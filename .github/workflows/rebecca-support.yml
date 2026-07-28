@@ -21,6 +21,11 @@ jobs:
           php -l admin.php
           php -l panels.php
           php -l Marzban.php
+          php -l botapi.php
+          php -l index.php
+          php -l table.php
+          php -l ticket_install.php
+          php -l ticket_system.php
 
       - name: Validate installer syntax
         run: bash -n install.sh
@@ -35,5 +40,13 @@ jobs:
           grep -Fq '$is_rebecca_panel' Marzban.php
           grep -Fq '$database_panel_version' admin.php
           grep -Fq '$inbounds_to_store = array(' admin.php
+          grep -Fq "require_once 'ticket_system.php'" index.php
+          grep -Fq 'function ticketCreateFromDraft' ticket_system.php
+          grep -Fq 'function ticketHandleUpdate' ticket_system.php
+          grep -Fq 'function ticketCheckOutageAlert' ticket_system.php
+          grep -Fq 'ticket_service_locks' ticket_system.php
+          grep -Fq 'id_user = ?' ticket_system.php
+          grep -Fq 'icon_custom_emoji_id' botapi.php
+          grep -Fq 'ticket_install.php' table.php
           test "$(grep -Fc 'https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip' install.sh)" -eq 3
           grep -Fq 'https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh' install.sh
