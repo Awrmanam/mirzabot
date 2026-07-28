@@ -29,9 +29,11 @@ jobs:
         shell: bash
         run: |
           grep -Fq "'text' => \"ربکا\"" keyboard.php
-          grep -Fq "'callback_data' => \"typepanel#marzban\"" keyboard.php
+          grep -Fq "'callback_data' => \"typepanel#rebecca\"" keyboard.php
           grep -Fq 'function rebecca_service_id_from_value' Marzban.php
           grep -Fq '"service_id" => $rebecca_service_id' Marzban.php
+          grep -Fq '$is_rebecca_panel' Marzban.php
+          grep -Fq '$database_panel_version' admin.php
           grep -Fq '$inbounds_to_store = array(' admin.php
           test "$(grep -Fc 'https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip' install.sh)" -eq 3
           grep -Fq 'https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh' install.sh
