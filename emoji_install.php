@@ -7,6 +7,14 @@
  * changes are never performed and data migrations are guarded by a version.
  */
 
+if (!defined('MIRZA_CUSTOM_EMOJI_MIGRATION') || MIRZA_CUSTOM_EMOJI_MIGRATION !== true) {
+    $GLOBALS['mirza_custom_emoji_migration_result'] = [
+        'ok' => false,
+        'message' => 'Custom Emoji migration must be invoked explicitly.',
+    ];
+    return;
+}
+
 try {
     if (!isset($pdo) || !($pdo instanceof PDO)) {
         throw new RuntimeException('PDO is not available for the emoji installer.');
@@ -100,7 +108,7 @@ try {
     $settings = [
         ['schema_version', '0'],
         ['global_fallback', ''],
-        ['usage_tracking', '1'],
+        ['usage_tracking', '0'],
         ['unknown_key_logging', '1'],
     ];
     $stmt = $pdo->prepare("INSERT IGNORE INTO styled_settings (setting_key, setting_value) VALUES (?, ?)");
@@ -184,6 +192,7 @@ try {
             $pdo->prepare("UPDATE styled_settings SET setting_value = '1'
                 WHERE setting_key = 'schema_version'")->execute();
             $pdo->commit();
+            $schemaVersion = 1;
         } catch (Throwable $migrationError) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -204,10 +213,102 @@ try {
                 SET value = REPLACE(value, 'Custom Emoji ID', 'کلید کتابخانه ایموجی')
                 WHERE content_key IN ('admin_content_detail', 'admin_option_detail')
                     AND value LIKE '%Custom Emoji ID%'")->execute();
-            $pdo->prepare("UPDATE styled_settings SET setting_value = '2'
-                WHERE setting_key = 'schema_version'")->execute();
+        }
+        $pdo->prepare("UPDATE styled_settings SET setting_value = '2'
+            WHERE setting_key = 'schema_version'")->execute();
+        $schemaVersion = 2;
+    }
+
+    $emojiSystemPath = __DIR__ . '/emoji_system.php';
+    $emojiSystemSource = is_file($emojiSystemPath)
+        ? (string) file_get_contents($emojiSystemPath)
+        : '';
+    if ($emojiSystemSource !== ''
+        && preg_match_all(
+            "/styledUi\\(\\s*'((?:\\\\'|[^'])*)'\\s*,\\s*'((?:\\\\'|[^'])*)'\\s*\\)/",
+            $emojiSystemSource,
+            $uiMatches,
+            PREG_SET_ORDER
+        )) {
+        $uiInsert = $pdo->prepare(
+            "INSERT IGNORE INTO styled_text_overrides
+             (source_type, source_key, display_name, value, is_active)
+             VALUES ('system_ui', ?, ?, ?, 1)"
+        );
+        foreach ($uiMatches as $uiMatch) {
+            $uiKey = str_replace("\\'", "'", $uiMatch[1]);
+            $uiValue = str_replace("\\'", "'", $uiMatch[2]);
+            $uiInsert->execute([$uiKey, $uiKey, $uiValue]);
         }
     }
+
+    $languagePath = __DIR__ . '/text.json';
+    $languagePayload = is_file($languagePath)
+        ? json_decode((string) file_get_contents($languagePath), true)
+        : null;
+    if (is_array($languagePayload)) {
+        $flattenLanguage = function (array $values, $prefix = '') use (&$flattenLanguage) {
+            $flat = [];
+            foreach ($values as $key => $value) {
+                $path = $prefix === '' ? (string) $key : $prefix . '.' . $key;
+                if (is_array($value)) {
+                    $flat += $flattenLanguage($value, $path);
+                } elseif (is_string($value) || is_numeric($value)) {
+                    $flat[$path] = (string) $value;
+                }
+            }
+            return $flat;
+        };
+        $languageInsert = $pdo->prepare(
+            "INSERT IGNORE INTO styled_text_overrides
+             (source_type, source_key, display_name, value, is_active)
+             VALUES ('language', ?, ?, ?, 1)"
+        );
+        $hashUpdate = $pdo->prepare(
+            "INSERT INTO styled_settings (setting_key, setting_value)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
+        );
+        foreach ($languagePayload as $languageCode => $languageValues) {
+            if (!is_array($languageValues)
+                || !preg_match('/^[a-z0-9_-]+$/i', (string) $languageCode)) {
+                continue;
+            }
+            $flatLanguage = $flattenLanguage($languageValues);
+            foreach ($flatLanguage as $path => $value) {
+                $sourceKey = $languageCode . '.' . $path;
+                $languageInsert->execute([$sourceKey, $sourceKey, $value]);
+            }
+            $hashUpdate->execute([
+                'language_seed_hash_' . $languageCode,
+                hash('sha256', $languagePath . '|' . json_encode($flatLanguage, JSON_UNESCAPED_UNICODE)),
+            ]);
+        }
+    }
+
+    $markerDirectory = __DIR__ . '/storage/cache';
+    $markerPath = $markerDirectory . '/custom_emoji_schema.ready';
+    if (!is_dir($markerDirectory)
+        && !mkdir($markerDirectory, 0775, true)
+        && !is_dir($markerDirectory)) {
+        throw new RuntimeException('Unable to create the Custom Emoji schema marker directory.');
+    }
+    $markerPayload = json_encode([
+        'schema_version' => max(2, $schemaVersion),
+        'migrated_at' => gmdate('c'),
+    ], JSON_UNESCAPED_SLASHES);
+    if ($markerPayload === false || file_put_contents($markerPath, $markerPayload, LOCK_EX) === false) {
+        throw new RuntimeException('Unable to write the Custom Emoji schema marker.');
+    }
+    $GLOBALS['mirza_custom_emoji_migration_result'] = [
+        'ok' => true,
+        'message' => 'Custom Emoji schema is ready.',
+        'marker' => $markerPath,
+    ];
 } catch (Throwable $e) {
     error_log('[Mirza Styled Emoji Install] ' . $e->getMessage());
+    $GLOBALS['mirza_custom_emoji_migration_result'] = [
+        'ok' => false,
+        'message' => $e->getMessage(),
+    ];
 }

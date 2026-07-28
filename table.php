@@ -1484,6 +1484,13 @@ $connect->query("ALTER TABLE `invoice` CHANGE `Volume` `Volume` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `price_product` `price_product` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `name_product` `name_product` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `username` `username` VARCHAR(200)");
+$emojiInstaller = __DIR__ . '/emoji_install.php';
+if (is_file($emojiInstaller)) {
+    if (!defined('MIRZA_CUSTOM_EMOJI_MIGRATION')) {
+        define('MIRZA_CUSTOM_EMOJI_MIGRATION', true);
+    }
+    require_once $emojiInstaller;
+}
 $ticketInstaller = __DIR__ . '/ticket_install.php';
 if (is_file($ticketInstaller)) {
     require_once $ticketInstaller;

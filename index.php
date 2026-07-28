@@ -3,8 +3,10 @@ $version = file_get_contents('version');
 date_default_timezone_set('Asia/Tehran');
 ini_set('default_charset', 'UTF-8');
 ini_set('error_log', 'error_log');
-ini_set('memory_limit', '-1');
 require_once 'config.php';
+if (ini_set('memory_limit', MIRZA_MEMORY_LIMIT) === false) {
+    error_log('[Mirza Runtime] Unable to apply MIRZA_MEMORY_LIMIT.');
+}
 require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';
@@ -12,7 +14,6 @@ require_once 'ticket_system.php';
 require_once 'keyboard.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';
-$textbotlang = languagechange('text.json');
 if ($is_bot)
     return;
 if (isset($update['chat_member'])) {
@@ -130,7 +131,6 @@ $channels_id = select("channels", "link", null, null, "FETCH_COLUMN");
 $pricepayment = select("Payment_report", "price", null, null, "FETCH_COLUMN");
 $listcard = select("card_number", "cardnumber", null, null, "FETCH_COLUMN");
 $topic_id = select("topicid", "*", null, null, "fetchAll");
-$datatextbot = $pdo->query("SELECT id_text, text FROM textbot")->fetchAll(PDO::FETCH_KEY_PAIR);
 $statusnote = false;
 foreach ($topic_id as $topic) {
     if ($topic['report'] == "reportnight")
@@ -7401,5 +7401,7 @@ if (isset($update['message']['successful_payment'])) {
 if (in_array($from_id, $admin_ids))
     require_once 'admin.php';
 
-$pdo = null;
+if (!defined('CUSTOM_EMOJI_USAGE_TRACKING') || CUSTOM_EMOJI_USAGE_TRACKING !== true) {
+    $pdo = null;
+}
 $connect->close();

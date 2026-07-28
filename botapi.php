@@ -1,5 +1,10 @@
 <?php
 require_once 'config.php';
+$mirzaRuntimeLog = __DIR__ . '/error_log';
+if (is_file($mirzaRuntimeLog) && @filesize($mirzaRuntimeLog) > 10 * 1024 * 1024) {
+    @unlink($mirzaRuntimeLog . '.1');
+    @rename($mirzaRuntimeLog, $mirzaRuntimeLog . '.1');
+}
 function telegram($method, $datas = [], $token = null)
 {
     global $APIKEY;
@@ -33,7 +38,9 @@ function telegram($method, $datas = [], $token = null)
 
     $ch = curl_init($url);
     if ($ch === false) {
-        error_log('Unable to initialise cURL for Telegram request.');
+        if (function_exists('styledLog')) {
+            styledLog('telegram_curl_init_failed', '', strtolower((string) $method), '');
+        }
         return [
             'ok' => false,
             'description' => 'Unable to initialise cURL for Telegram request.'
@@ -50,8 +57,8 @@ function telegram($method, $datas = [], $token = null)
         $curlError = curl_error($ch);
         curl_close($ch);
 
-        if ($curlError !== '') {
-            error_log('Telegram request failed: ' . $curlError);
+        if ($curlError !== '' && function_exists('styledLog')) {
+            styledLog('telegram_network_failed', '', strtolower((string) $method), $curlError);
         }
 
         return [
@@ -65,8 +72,14 @@ function telegram($method, $datas = [], $token = null)
 
     $decodedResponse = json_decode($rawResponse, true);
     if (!is_array($decodedResponse)) {
-        $logSnippet = substr($rawResponse, 0, 200);
-        error_log(sprintf('Invalid response from Telegram API (HTTP %d): %s', $httpCode, $logSnippet));
+        if (function_exists('styledLog')) {
+            styledLog(
+                'telegram_invalid_response',
+                '',
+                strtolower((string) $method) . ':' . $httpCode,
+                defined('APP_DEBUG') && APP_DEBUG ? substr($rawResponse, 0, 200) : ''
+            );
+        }
 
         return [
             'ok' => false,
@@ -77,13 +90,31 @@ function telegram($method, $datas = [], $token = null)
 
     if (isset($decodedResponse['ok']) && !$decodedResponse['ok']) {
         if ($fallbackAttempted) {
-            error_log(json_encode($decodedResponse));
+            if (function_exists('styledLog')) {
+                styledLog(
+                    'telegram_fallback_failed',
+                    '',
+                    strtolower((string) $method) . ':' . (int) ($decodedResponse['error_code'] ?? 0),
+                    (string) ($decodedResponse['description'] ?? '')
+                );
+            }
             return $decodedResponse;
         }
-        $fallbackDatas = !empty($styledPrepared['has_custom'])
-            ? $styledPrepared['fallback']
-            : $datas;
-        $fallbackChanged = !empty($styledPrepared['has_custom']);
+        $fallbackChanged = !empty($styledPrepared['has_custom'])
+            && function_exists('styledTelegramErrorAllowsEmojiFallback')
+            && styledTelegramErrorAllowsEmojiFallback($decodedResponse);
+        if (!$fallbackChanged) {
+            if (function_exists('styledLog')) {
+                styledLog(
+                    'telegram_request_failed',
+                    '',
+                    strtolower((string) $method) . ':' . (int) ($decodedResponse['error_code'] ?? 0),
+                    (string) ($decodedResponse['description'] ?? '')
+                );
+            }
+            return $decodedResponse;
+        }
+        $fallbackDatas = $styledPrepared['fallback'];
         foreach (['text', 'caption'] as $textField) {
             if (!empty($fallbackDatas[$textField]) && strpos($fallbackDatas[$textField], '<tg-emoji') !== false) {
                 $fallbackDatas[$textField] = preg_replace(
@@ -119,7 +150,6 @@ function telegram($method, $datas = [], $token = null)
             $fallbackDatas['__telegram_fallback_attempted'] = 1;
             return telegram($method, $fallbackDatas, $token);
         }
-        error_log(json_encode($decodedResponse));
     }
 
     return $decodedResponse;

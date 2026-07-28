@@ -379,14 +379,27 @@ function update($table, $field, $newValue, $whereField = null, $whereValue = nul
         }
     }
 
-    $date = date("Y-m-d H:i:s");
-    if (!isset($user['step'])) {
-        $user['step'] = '';
-    }
-    $logValue = is_scalar($valueToStore) ? $valueToStore : json_encode($valueToStore, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $logss = "{$table}_{$field}_{$logValue}_{$whereField}_{$whereValue}_{$user['step']}_$date";
-    if ($field != "message_count" || $field != "last_message_time") {
-        file_put_contents('log.txt', "\n" . $logss, FILE_APPEND);
+    if (defined('APP_DEBUG')
+        && APP_DEBUG
+        && $field !== 'message_count'
+        && $field !== 'last_message_time') {
+        $date = date("Y-m-d H:i:s");
+        if (!isset($user['step'])) {
+            $user['step'] = '';
+        }
+        $logValue = is_scalar($valueToStore)
+            ? $valueToStore
+            : json_encode($valueToStore, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $logValue = function_exists('mb_substr')
+            ? mb_substr((string) $logValue, 0, 500, 'UTF-8')
+            : substr((string) $logValue, 0, 500);
+        $logss = "{$table}_{$field}_{$logValue}_{$whereField}_{$whereValue}_{$user['step']}_$date";
+        $debugLogPath = __DIR__ . '/log.txt';
+        if (is_file($debugLogPath) && filesize($debugLogPath) > 5 * 1024 * 1024) {
+            @unlink($debugLogPath . '.1');
+            @rename($debugLogPath, $debugLogPath . '.1');
+        }
+        file_put_contents($debugLogPath, "\n" . $logss, FILE_APPEND | LOCK_EX);
     }
 
     clearSelectCache($table);
@@ -1614,15 +1627,34 @@ function addCronIfNotExists($cronCommand)
         return $line !== '' && strpos($line, '#') !== 0;
     }));
 
-    $newLineAdded = false;
+    $managedUrls = [];
+    foreach ($commands as $command) {
+        if (preg_match('~https://[^\s\'"]+/cronbot/[A-Za-z0-9_.-]+\.php~', $command, $match)) {
+            $managedUrls[$match[0]] = $command;
+        }
+    }
+    $cronChanged = false;
+    $cronLines = array_values(array_filter(
+        $cronLines,
+        static function ($line) use ($managedUrls, &$cronChanged) {
+            foreach ($managedUrls as $url => $replacement) {
+                if (strpos($line, $url) !== false && $line !== $replacement) {
+                    $cronChanged = true;
+                    return false;
+                }
+            }
+            return true;
+        }
+    ));
+
     foreach ($commands as $command) {
         if (!in_array($command, $cronLines, true)) {
             $cronLines[] = $command;
-            $newLineAdded = true;
+            $cronChanged = true;
         }
     }
 
-    if (!$newLineAdded) {
+    if (!$cronChanged) {
         return true;
     }
 
@@ -1647,27 +1679,47 @@ function addCronIfNotExists($cronCommand)
     return true;
 }
 
+function mirzaCronCommand($schedule, $domain, $endpoint, $timeoutSeconds = 50)
+{
+    $endpoint = basename((string) $endpoint);
+    if (!preg_match('/^[A-Za-z0-9_.-]+\.php$/', $endpoint)) {
+        throw new InvalidArgumentException('Invalid Mirza cron endpoint.');
+    }
+    $timeoutSeconds = max(10, (int) $timeoutSeconds);
+    $maxTime = max(5, $timeoutSeconds - 5);
+    $lockName = preg_replace('/[^A-Za-z0-9_.-]/', '-', pathinfo($endpoint, PATHINFO_FILENAME));
+    $url = 'https://' . $domain . '/cronbot/' . $endpoint;
+    return sprintf(
+        '%s flock -n /tmp/mirza-%s.lock timeout %ds curl -fsS --connect-timeout 5 --max-time %d %s >/dev/null 2>&1',
+        $schedule,
+        $lockName,
+        $timeoutSeconds,
+        $maxTime,
+        escapeshellarg($url)
+    );
+}
+
 function activecron()
 {
     global $domainhosts;
 
     $cronCommands = [
-        "*/15 * * * * curl https://$domainhosts/cronbot/statusday.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/croncard.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/NoticationsService.php",
-        "*/5 * * * * curl https://$domainhosts/cronbot/payment_expire.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/sendmessage.php",
-        "*/3 * * * * curl https://$domainhosts/cronbot/plisio.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/activeconfig.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/disableconfig.php",
-        "*/1 * * * * curl https://$domainhosts/cronbot/iranpay1.php",
-        "0 */5 * * * curl https://$domainhosts/cronbot/backupbot.php",
-        "*/2 * * * * curl https://$domainhosts/cronbot/gift.php",
-        "*/30 * * * * curl https://$domainhosts/cronbot/expireagent.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/on_hold.php",
-        "*/2 * * * * curl https://$domainhosts/cronbot/configtest.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/uptime_node.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/uptime_panel.php",
+        mirzaCronCommand('*/15 * * * *', $domainhosts, 'statusday.php'),
+        mirzaCronCommand('*/1 * * * *', $domainhosts, 'croncard.php'),
+        mirzaCronCommand('*/1 * * * *', $domainhosts, 'NoticationsService.php'),
+        mirzaCronCommand('*/5 * * * *', $domainhosts, 'payment_expire.php'),
+        mirzaCronCommand('*/1 * * * *', $domainhosts, 'sendmessage.php'),
+        mirzaCronCommand('*/3 * * * *', $domainhosts, 'plisio.php'),
+        mirzaCronCommand('*/1 * * * *', $domainhosts, 'activeconfig.php'),
+        mirzaCronCommand('*/1 * * * *', $domainhosts, 'disableconfig.php'),
+        mirzaCronCommand('*/1 * * * *', $domainhosts, 'iranpay1.php'),
+        mirzaCronCommand('0 */5 * * *', $domainhosts, 'backupbot.php', 240),
+        mirzaCronCommand('*/2 * * * *', $domainhosts, 'gift.php'),
+        mirzaCronCommand('*/30 * * * *', $domainhosts, 'expireagent.php'),
+        mirzaCronCommand('*/15 * * * *', $domainhosts, 'on_hold.php'),
+        mirzaCronCommand('*/2 * * * *', $domainhosts, 'configtest.php'),
+        mirzaCronCommand('*/15 * * * *', $domainhosts, 'uptime_node.php'),
+        mirzaCronCommand('*/15 * * * *', $domainhosts, 'uptime_panel.php'),
     ];
 
     addCronIfNotExists($cronCommands);
@@ -1823,8 +1875,14 @@ function publickey()
 }
 function languagechange($path_dir)
 {
+    static $requestCache = [];
+    $resolvedPath = realpath($path_dir);
+    $cacheKey = $resolvedPath !== false ? $resolvedPath : (string) $path_dir;
+    if (array_key_exists($cacheKey, $requestCache)) {
+        return $requestCache[$cacheKey];
+    }
     $setting = select("setting", "*");
-    $languageData = json_decode(file_get_contents($path_dir), true);
+    $languageData = json_decode(file_get_contents($cacheKey), true);
     $selectedLanguage = 'fa';
     if (intval($setting['languageen']) == 1) {
         $selectedLanguage = 'en';
@@ -1832,11 +1890,13 @@ function languagechange($path_dir)
         $selectedLanguage = 'ru';
     }
     $values = $languageData[$selectedLanguage] ?? ($languageData['fa'] ?? []);
-    return function_exists('styledCustomEmojiEnabled')
+    $result = function_exists('styledCustomEmojiEnabled')
         && styledCustomEmojiEnabled()
         && function_exists('styledApplyLanguageOverrides')
-        ? styledApplyLanguageOverrides($selectedLanguage, $values, $path_dir)
+        ? styledApplyLanguageOverrides($selectedLanguage, $values, $cacheKey)
         : $values;
+    $requestCache[$cacheKey] = $result;
+    return $result;
 }
 function generateAuthStr($length = 10)
 {
