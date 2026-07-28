@@ -1244,6 +1244,11 @@ $keyboardtypepanel = json_encode([
     'inline_keyboard' => [
         [
             ['text' => "مرزبان" , 'callback_data' => "typepanel#marzban"],
+            // Rebecca keeps the Marzban REST contract; storing the compatible
+            // type reuses the complete, tested Mirza lifecycle without forks.
+            ['text' => "ربکا" , 'callback_data' => "typepanel#marzban"]
+        ],
+        [
             ['text' => "مرزنشین" , 'callback_data' => "typepanel#marzneshin"]
         ],
         [

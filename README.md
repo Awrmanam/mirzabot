@@ -35,7 +35,7 @@ A Powerful Bot for Selling VPN Services with Auto Configuration Build.
 
 ## ✨ Overview
 
-**Mirza Bot** is a feature-rich Telegram bot designed for selling VPN services for platforms like **Marzban**,**3x-ui panels**,**alireza panels**,**pasarguard**,**ibsng**,.... This bot simplifies the process of VPN subscription sales, enabling seamless automation, configuration building, and user management.
+**Mirza Bot** is a feature-rich Telegram bot designed for selling VPN services for platforms like **Marzban**, **Rebecca**, **3x-ui panels**, **alireza panels**, **pasarguard**, **ibsng**,.... This bot simplifies the process of VPN subscription sales, enabling seamless automation, configuration building, and user management.
 
 Mirza Panel comes in two versions:  
 1. **Free Version** 🆓: Offers basic functionalities to get started with VPN sales.  
@@ -101,10 +101,26 @@ Ensure you have the following before installation:
 Run the following command in your server terminal:
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/mirzabot/main/install.sh && bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh -o install.sh && sudo bash install.sh
 ```
 
 When prompted, **select option 1** to complete the installation.
+
+### Rebecca panel
+
+Rebecca uses the Marzban-compatible REST API, so it is isolated from the other
+panel integrations and uses the existing, tested Marzban request path.
+
+1. In Rebecca, create a service and add its **Service inbound**. Its tag has the
+   form `setservice-<service_id>`.
+2. In Mirza, add a panel and select **ربکا**.
+3. Enter the Rebecca dashboard base URL (without `/dashboard`), admin username,
+   and password.
+4. Open the new panel's settings in Mirza and select the `setservice-<id>`
+   inbound. Do not combine it with another inbound.
+
+The Rebecca API itself does not need the optional Swagger UI (`DOCS=True`) to be
+enabled. Mirza calls the API endpoints directly.
 
 
 ---
@@ -114,7 +130,7 @@ When prompted, **select option 1** to complete the installation.
 To update your bot to the latest version, use the following command:
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/main/install.sh && bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh -o install.sh && sudo bash install.sh
 ```
 When prompted, **select option update** to remove the bot.
 ---
@@ -124,7 +140,7 @@ When prompted, **select option update** to remove the bot.
 If you want to completely remove the bot from your server, run the following command:
 
 ```bash
-curl -o install.sh -L https://raw.githubusercontent.com/mahdiMGF2/botmirzapanel/main/install.sh && bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh -o install.sh && sudo bash install.sh
 ```
 
 When prompted, **select option 3** to remove the bot.
