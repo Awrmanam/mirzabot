@@ -1,5 +1,8 @@
 <?php
 require_once 'config.php';
+if (!function_exists('ticketEnhanceMainKeyboard')) {
+    require_once __DIR__ . '/ticket_system.php';
+}
 $setting = select("setting", "*", null, null,"select");
 $textbotlang = languagechange(__DIR__.'/text.json');
 if (!function_exists('getPaySettingValue')) {
@@ -169,6 +172,7 @@ if ($setting['inlinebtnmain'] == "oninline" && !empty($keyboardRows)) {
     $keyboard['keyboard'] = $keyboardcustom;
     $keyboard = json_encode($keyboard);
 }
+$keyboard = ticketEnhanceMainKeyboard($keyboard, $setting['inlinebtnmain'] == "oninline");
 
 $keyboardPanel = json_encode([
     'inline_keyboard' => [
@@ -214,6 +218,7 @@ $keyboardadmin = json_encode([
     'resize_keyboard' => true
 ]);
 }
+$keyboardadmin = isset($keyboardadmin) ? ticketEnhanceAdminKeyboard($keyboardadmin) : null;
 $CartManage = json_encode([
     'keyboard' => [
         [['text' => "🗂 نام درگاه کارت به کارت"]],

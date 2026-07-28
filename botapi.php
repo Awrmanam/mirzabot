@@ -56,6 +56,41 @@ function telegram($method, $datas = [], $token = null)
     }
 
     if (isset($decodedResponse['ok']) && !$decodedResponse['ok']) {
+        $fallbackDatas = $datas;
+        $fallbackChanged = false;
+        foreach (['text', 'caption'] as $textField) {
+            if (!empty($fallbackDatas[$textField]) && strpos($fallbackDatas[$textField], '<tg-emoji') !== false) {
+                $fallbackDatas[$textField] = preg_replace(
+                    '/<tg-emoji\b[^>]*>(.*?)<\/tg-emoji>/us',
+                    '$1',
+                    $fallbackDatas[$textField]
+                );
+                $fallbackChanged = true;
+            }
+        }
+        if (!empty($fallbackDatas['reply_markup']) && is_string($fallbackDatas['reply_markup'])) {
+            $replyMarkup = json_decode($fallbackDatas['reply_markup'], true);
+            if (is_array($replyMarkup)) {
+                $stripCustomEmoji = function (&$value) use (&$stripCustomEmoji, &$fallbackChanged) {
+                    if (!is_array($value)) {
+                        return;
+                    }
+                    if (array_key_exists('icon_custom_emoji_id', $value)) {
+                        unset($value['icon_custom_emoji_id']);
+                        $fallbackChanged = true;
+                    }
+                    foreach ($value as &$child) {
+                        $stripCustomEmoji($child);
+                    }
+                    unset($child);
+                };
+                $stripCustomEmoji($replyMarkup);
+                $fallbackDatas['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            }
+        }
+        if ($fallbackChanged) {
+            return telegram($method, $fallbackDatas, $token);
+        }
         error_log(json_encode($decodedResponse));
     }
 

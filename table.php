@@ -1484,6 +1484,10 @@ $connect->query("ALTER TABLE `invoice` CHANGE `Volume` `Volume` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `price_product` `price_product` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `name_product` `name_product` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `username` `username` VARCHAR(200)");
+$ticketInstaller = __DIR__ . '/ticket_install.php';
+if (is_file($ticketInstaller)) {
+    require_once $ticketInstaller;
+}
 $connect->query("ALTER TABLE `invoice` CHANGE `Service_location` `Service_location` VARCHAR(200)");
 $connect->query("ALTER TABLE `invoice` CHANGE `time_sell` `time_sell` VARCHAR(200)");
 $connect->query("ALTER TABLE marzban_panel MODIFY name_panel VARCHAR(255) COLLATE utf8mb4_bin");

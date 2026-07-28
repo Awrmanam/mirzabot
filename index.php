@@ -8,6 +8,7 @@ require_once 'config.php';
 require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';
+require_once 'ticket_system.php';
 require_once 'keyboard.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';
@@ -391,6 +392,9 @@ if ($user['joinchannel'] != "active") {
             return;
         }
     }
+}
+if (ticketHandleUpdate()) {
+    return;
 }
 if ($text == "/start" || $datain == "start" || $text == "start") {
     sendmessage($from_id, $datatextbot['text_start'], $keyboard, "html");
@@ -934,6 +938,7 @@ if ($text == "/start" || $datain == "start" || $text == "start") {
             ]
         ]
     ]);
+    $keyboardsetting = ticketAppendServiceButton($keyboardsetting, $nameloc['id_invoice']);
     if ($marzban['type'] == "ibsng" || $marzban['type'] == "mikrotik") {
         $userpassword = "🔑 رمز عبور سرویس شما : <code>{$DataUserOut['subscription_url']}</code>";
     } else {
@@ -1024,6 +1029,7 @@ $nameconfig";
         if ($marzbanstatusextra == "offextra")
             unset($keyboardsetting['inline_keyboard'][0][1]);
         $keyboardsetting['inline_keyboard'] = array_values($keyboardsetting['inline_keyboard']);
+        $keyboardsetting = ticketAppendServiceButton($keyboardsetting, $nameloc['id_invoice']);
         $keyboardsetting = json_encode($keyboardsetting);
     } else {
         $marzbancount = select("marzban_panel", "*", "status", "active", "count");
@@ -1080,10 +1086,6 @@ $nameconfig";
             'change-location' => array(
                 'text' => $textbotlang['Admin']['change-location']['title'],
                 'callback_data' => "changeloc_"
-            ),
-            'ekhtelal' => array(
-                'text' => "⚠️ ارسال گزارش اختلال",
-                'callback_data' => "disorder-"
             )
         );
         if ($nameloc['name_product'] == "سرویس تست") {
@@ -1125,8 +1127,6 @@ $nameconfig";
             unset($keyboarddate['changestatus']);
             unset($keyboarddate['config']);
         }
-        if ($statusdisorder == "offdisorder")
-            unset($keyboarddate['ekhtelal']);
         if ($nameloc['Service_time'] == "0")
             unset($keyboarddate['Extra_time']);
         if ($nameloc['Volume'] == "0") {
@@ -1157,6 +1157,7 @@ $nameconfig";
         if (count($tempArray) > 0) {
             $keyboardsetting['inline_keyboard'][] = $tempArray;
         }
+        $keyboardsetting = ticketAppendServiceButton($keyboardsetting, $nameloc['id_invoice']);
         $keyboardsetting['inline_keyboard'][] = [['text' => $textbotlang['users']['stateus']['backlist'], 'callback_data' => 'backorder']];
         $keyboardsetting = json_encode($keyboardsetting);
         if ($DataUserOut['sub_updated_at'] !== null) {
