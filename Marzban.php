@@ -206,6 +206,26 @@ function revoke_sub($username_account,$location)
     return $response;
 }
 #-----------------------------#
+function rebecca_service_id_from_value($value)
+{
+    if (is_string($value) && preg_match('/^setservice-(\d+)$/i', trim($value), $matches)) {
+        $service_id = intval($matches[1]);
+        return $service_id > 0 ? $service_id : null;
+    }
+    if (is_object($value)) {
+        $value = (array) $value;
+    }
+    if (is_array($value)) {
+        foreach ($value as $item) {
+            $service_id = rebecca_service_id_from_value($item);
+            if ($service_id !== null) {
+                return $service_id;
+            }
+        }
+    }
+    return null;
+}
+#-----------------------------#
 function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_limit_reset = 'no_reset',$name_product = false)
 {
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
@@ -316,6 +336,32 @@ function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_l
         }
         }
         }
+    // Rebecca exposes the legacy Marzban endpoints, but service-based users must
+    // receive a numeric service_id instead of the legacy inbound selection.
+    $rebecca_service_id = isset($inbounds) ? rebecca_service_id_from_value($inbounds) : null;
+    if ($rebecca_service_id !== null) {
+        $rebecca_data = array(
+            "username" => $username_ac,
+            "service_id" => $rebecca_service_id,
+            "data_limit" => intval($data_limit),
+            "data_limit_reset_strategy" => $data_limit_reset,
+            "note" => $note
+        );
+        $rebecca_proxies = json_decode($marzban_list_get['proxies'], true);
+        if (is_array($rebecca_proxies)) {
+            $rebecca_data["proxies"] = $rebecca_proxies;
+        }
+        if (isset($data["status"]) && $data["status"] == "on_hold") {
+            $rebecca_data["status"] = "on_hold";
+            $rebecca_data["expire"] = 0;
+            if (isset($data["on_hold_expire_duration"])) {
+                $rebecca_data["on_hold_expire_duration"] = intval($data["on_hold_expire_duration"]);
+            }
+        } else {
+            $rebecca_data["expire"] = $timestamp > 0 ? intval($timestamp) : 0;
+        }
+        $data = $rebecca_data;
+    }
     $headers = array(
             'accept: application/json',
             'Content-Type: application/json'
@@ -394,6 +440,20 @@ function Modifyuser($location,$username,array $data)
             'accept: application/json',
             'Content-Type: application/json'
     );
+    $rebecca_service_id = null;
+    if (isset($data['inbounds'])) {
+        $rebecca_service_id = rebecca_service_id_from_value($data['inbounds']);
+    }
+    if ($rebecca_service_id === null && isset($data['group_ids'])) {
+        $rebecca_service_id = rebecca_service_id_from_value($data['group_ids']);
+    }
+    if ($rebecca_service_id !== null) {
+        $data['service_id'] = $rebecca_service_id;
+        unset($data['inbounds'], $data['group_ids'], $data['proxy_settings']);
+        if (isset($data['expire']) && is_string($data['expire']) && !ctype_digit($data['expire'])) {
+            $data['expire'] = strtotime($data['expire']);
+        }
+    }
     $payload = json_encode($data);
     $req = new CurlRequest($url);
     $req->setHeaders($headers);

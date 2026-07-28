@@ -9535,7 +9535,18 @@ f,n.n2", $backadmin, 'HTML');
                     $DataUserOut['proxies'][$key] = new stdClass();
                 }
             }
-            update("marzban_panel", "inbounds", json_encode($DataUserOut['inbounds']), "name_panel", $user['Processing_value']);
+            $inbounds_to_store = $DataUserOut['inbounds'];
+            if (isset($DataUserOut['service_id']) && intval($DataUserOut['service_id']) > 0) {
+                $service_protocol = "vless";
+                foreach ($DataUserOut['proxies'] as $protocol_name => $protocol_settings) {
+                    $service_protocol = $protocol_name;
+                    break;
+                }
+                $inbounds_to_store = array(
+                    $service_protocol => array("setservice-" . intval($DataUserOut['service_id']))
+                );
+            }
+            update("marzban_panel", "inbounds", json_encode($inbounds_to_store), "name_panel", $user['Processing_value']);
             update("marzban_panel", "proxies", json_encode($DataUserOut['proxies'], true), "name_panel", $user['Processing_value']);
         }
     } elseif ($panel['type'] == "s_ui") {
