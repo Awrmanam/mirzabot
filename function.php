@@ -1824,14 +1824,17 @@ function publickey()
 function languagechange($path_dir)
 {
     $setting = select("setting", "*");
-    return json_decode(file_get_contents($path_dir), true)['fa'];
+    $languageData = json_decode(file_get_contents($path_dir), true);
+    $selectedLanguage = 'fa';
     if (intval($setting['languageen']) == 1) {
-        return json_decode(file_get_contents($path_dir), true)['en'];
+        $selectedLanguage = 'en';
     } elseif (intval($setting['languageru']) == 1) {
-        return json_decode(file_get_contents($path_dir), true)['ru'];
-    } else {
-        return json_decode(file_get_contents($path_dir), true)['fa'];
+        $selectedLanguage = 'ru';
     }
+    $values = $languageData[$selectedLanguage] ?? ($languageData['fa'] ?? []);
+    return function_exists('styledApplyLanguageOverrides')
+        ? styledApplyLanguageOverrides($selectedLanguage, $values, $path_dir)
+        : $values;
 }
 function generateAuthStr($length = 10)
 {

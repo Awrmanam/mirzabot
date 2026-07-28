@@ -219,6 +219,9 @@ $keyboardadmin = json_encode([
 ]);
 }
 $keyboardadmin = isset($keyboardadmin) ? ticketEnhanceAdminKeyboard($keyboardadmin) : null;
+$keyboardadmin = isset($keyboardadmin) && function_exists('styledEnhanceAdminKeyboard')
+    ? styledEnhanceAdminKeyboard($keyboardadmin)
+    : $keyboardadmin;
 $CartManage = json_encode([
     'keyboard' => [
         [['text' => "🗂 نام درگاه کارت به کارت"]],

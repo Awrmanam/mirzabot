@@ -393,6 +393,9 @@ if ($user['joinchannel'] != "active") {
         }
     }
 }
+if (styledHandleUpdate()) {
+    return;
+}
 if (ticketHandleUpdate()) {
     return;
 }

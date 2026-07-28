@@ -4,6 +4,18 @@ function telegram($method, $datas = [], $token = null)
 {
     global $APIKEY;
 
+    $skipStyledRendering = !empty($datas['__styled_fallback']);
+    unset($datas['__styled_fallback']);
+    $styledPrepared = [
+        'primary' => $datas,
+        'fallback' => $datas,
+        'has_custom' => false,
+    ];
+    if (!$skipStyledRendering && function_exists('styledPrepareTelegramRequest')) {
+        $styledPrepared = styledPrepareTelegramRequest($method, $datas);
+        $datas = $styledPrepared['primary'];
+    }
+
     $token = $token === null ? $APIKEY : $token;
     $url = "https://api.telegram.org/bot" . $token . "/" . $method;
 
@@ -56,8 +68,10 @@ function telegram($method, $datas = [], $token = null)
     }
 
     if (isset($decodedResponse['ok']) && !$decodedResponse['ok']) {
-        $fallbackDatas = $datas;
-        $fallbackChanged = false;
+        $fallbackDatas = !empty($styledPrepared['has_custom'])
+            ? $styledPrepared['fallback']
+            : $datas;
+        $fallbackChanged = !empty($styledPrepared['has_custom']);
         foreach (['text', 'caption'] as $textField) {
             if (!empty($fallbackDatas[$textField]) && strpos($fallbackDatas[$textField], '<tg-emoji') !== false) {
                 $fallbackDatas[$textField] = preg_replace(
@@ -89,6 +103,7 @@ function telegram($method, $datas = [], $token = null)
             }
         }
         if ($fallbackChanged) {
+            $fallbackDatas['__styled_fallback'] = 1;
             return telegram($method, $fallbackDatas, $token);
         }
         error_log(json_encode($decodedResponse));
@@ -96,6 +111,7 @@ function telegram($method, $datas = [], $token = null)
 
     return $decodedResponse;
 }
+require_once __DIR__ . '/emoji_system.php';
 function sendmessage($chat_id,$text,$keyboard,$parse_mode,$bot_token = null){
     if(intval($chat_id) == 0)return ['ok' => false];
     return telegram('sendmessage',[
