@@ -52,6 +52,11 @@ function ticketEnabled()
     return ticketSystemReady() && ticketSetting('enabled', '1') === '1';
 }
 
+function ticketStyledEmojiEnabled()
+{
+    return function_exists('styledCustomEmojiEnabled') && styledCustomEmojiEnabled();
+}
+
 function ticketContentRow($key)
 {
     global $pdo;
@@ -84,6 +89,9 @@ function ticketButtonText($value)
 function ticketCustomEmojiIsValid($customEmojiId)
 {
     static $cache = [];
+    if (!ticketStyledEmojiEnabled()) {
+        return false;
+    }
     $customEmojiId = trim((string) $customEmojiId);
     if ($customEmojiId === '' || !preg_match('/^[0-9]{10,32}$/', $customEmojiId)) {
         return false;
@@ -119,7 +127,7 @@ function ticketRender($key, array $variables = [], $withEmoji = true)
     }
     $emoji = trim((string) $row['emoji']);
     $emojiKey = trim((string) ($row['emoji_key'] ?? ''));
-    if ($emojiKey !== '' && function_exists('styledToken')) {
+    if ($emojiKey !== '' && ticketStyledEmojiEnabled() && function_exists('styledToken')) {
         return styledToken($emojiKey) . ' ' . $value;
     }
     if ($emoji === '') {
@@ -138,14 +146,15 @@ function ticketButton($key, $callbackData)
         return null;
     }
     $emojiKey = trim((string) ($row['emoji_key'] ?? ''));
-    $label = $emojiKey !== ''
+    $useStyledEmoji = $emojiKey !== '' && ticketStyledEmojiEnabled();
+    $label = $useStyledEmoji
         ? ticketButtonText((string) $row['value'])
         : ticketButtonText((string) $row['emoji'] . ' ' . (string) $row['value']);
     $button = [
         'text' => $label,
         'callback_data' => $callbackData,
     ];
-    if ($emojiKey !== '') {
+    if ($useStyledEmoji) {
         $button['icon_emoji_key'] = $emojiKey;
     } elseif (ticketCustomEmojiIsValid($row['custom_emoji_id'])) {
         $button['icon_custom_emoji_id'] = (string) $row['custom_emoji_id'];
@@ -164,13 +173,14 @@ function ticketDynamicButton($key, array $variables, $callbackData)
         $label = str_replace('{' . $name . '}', (string) $replacement, $label);
     }
     $emojiKey = trim((string) ($row['emoji_key'] ?? ''));
+    $useStyledEmoji = $emojiKey !== '' && ticketStyledEmojiEnabled();
     $button = [
-        'text' => $emojiKey !== ''
+        'text' => $useStyledEmoji
             ? ticketButtonText($label)
             : ticketButtonText((string) $row['emoji'] . ' ' . $label),
         'callback_data' => $callbackData,
     ];
-    if ($emojiKey !== '') {
+    if ($useStyledEmoji) {
         $button['icon_emoji_key'] = $emojiKey;
     } elseif (ticketCustomEmojiIsValid($row['custom_emoji_id'])) {
         $button['icon_custom_emoji_id'] = (string) $row['custom_emoji_id'];
@@ -181,13 +191,14 @@ function ticketDynamicButton($key, array $variables, $callbackData)
 function ticketButtonFromOption(array $option, $callbackData)
 {
     $emojiKey = trim((string) ($option['emoji_key'] ?? ''));
+    $useStyledEmoji = $emojiKey !== '' && ticketStyledEmojiEnabled();
     $button = [
-        'text' => $emojiKey !== ''
+        'text' => $useStyledEmoji
             ? ticketButtonText((string) $option['label'])
             : ticketButtonText((string) $option['emoji'] . ' ' . (string) $option['label']),
         'callback_data' => $callbackData,
     ];
-    if ($emojiKey !== '') {
+    if ($useStyledEmoji) {
         $button['icon_emoji_key'] = $emojiKey;
     } elseif (ticketCustomEmojiIsValid($option['custom_emoji_id'] ?? '')) {
         $button['icon_custom_emoji_id'] = (string) $option['custom_emoji_id'];
@@ -228,10 +239,14 @@ function ticketEnhanceMainKeyboard($keyboardJson, $inline = false)
         $keyboard[$container] = [];
     }
     $reportLabel = ticketButtonText(
-        !empty($report['emoji_key']) ? $report['value'] : $report['emoji'] . ' ' . $report['value']
+        !empty($report['emoji_key']) && ticketStyledEmojiEnabled()
+            ? $report['value']
+            : $report['emoji'] . ' ' . $report['value']
     );
     $mineLabel = ticketButtonText(
-        !empty($mine['emoji_key']) ? $mine['value'] : $mine['emoji'] . ' ' . $mine['value']
+        !empty($mine['emoji_key']) && ticketStyledEmojiEnabled()
+            ? $mine['value']
+            : $mine['emoji'] . ' ' . $mine['value']
     );
     foreach ($keyboard[$container] as $row) {
         foreach ($row as $button) {
@@ -276,7 +291,9 @@ function ticketEnhanceAdminKeyboard($keyboardJson)
         return $keyboardJson;
     }
     $label = ticketButtonText(
-        !empty($row['emoji_key']) ? $row['value'] : $row['emoji'] . ' ' . $row['value']
+        !empty($row['emoji_key']) && ticketStyledEmojiEnabled()
+            ? $row['value']
+            : $row['emoji'] . ' ' . $row['value']
     );
     foreach (($keyboard['keyboard'] ?? []) as $buttons) {
         foreach ($buttons as $button) {
@@ -386,7 +403,7 @@ function ticketOptionLabel($group, $key, $parent = '')
     if (!$row) {
         return ticketEscape($key);
     }
-    if (!empty($row['emoji_key']) && function_exists('styledToken')) {
+    if (!empty($row['emoji_key']) && ticketStyledEmojiEnabled() && function_exists('styledToken')) {
         return styledToken($row['emoji_key']) . ' ' . $row['label'];
     }
     return trim($row['emoji'] . ' ' . $row['label']);
@@ -1358,10 +1375,10 @@ function ticketAdminContentDetail($adminId, $contentId)
     ticketSendPage($adminId, $text, ticketKeyboard([
         [ticketButton('admin_edit_value', 'tadm_content_edit_value_' . $item['id'])],
         [ticketButton('admin_edit_emoji', 'tadm_content_edit_emoji_' . $item['id']),
-            function_exists('styledAdminButton')
+            ticketStyledEmojiEnabled() && function_exists('styledAdminButton')
                 ? styledAdminButton(styledUi('select_library_emoji_button', 'انتخاب از کتابخانه'), 'sem_tc_icon_' . $item['id'], 'premium')
                 : ticketButton('admin_edit_custom_emoji', 'tadm_content_edit_custom_' . $item['id'])],
-        [function_exists('styledAdminButton')
+        [ticketStyledEmojiEnabled() && function_exists('styledAdminButton')
             ? styledAdminButton(styledUi('insert_emoji_button', 'درج ایموجی'), 'sem_tc_insert_' . $item['id'], 'premium')
             : ticketButton('admin_edit_custom_emoji', 'tadm_content_edit_custom_' . $item['id'])],
         [ticketButton('admin_toggle', 'tadm_content_toggle_' . $item['id'])],
@@ -1448,7 +1465,7 @@ function ticketAdminOptionDetail($adminId, $optionId)
             ticketButton('admin_edit_parent', 'tadm_option_edit_parent_' . $item['id'])],
         [ticketButton('admin_edit_key', 'tadm_option_edit_key_' . $item['id'])],
         [ticketButton('admin_edit_emoji', 'tadm_option_edit_emoji_' . $item['id']),
-            function_exists('styledAdminButton')
+            ticketStyledEmojiEnabled() && function_exists('styledAdminButton')
                 ? styledAdminButton(styledUi('select_library_emoji_button', 'انتخاب از کتابخانه'), 'sem_to_icon_' . $item['id'], 'premium')
                 : ticketButton('admin_edit_custom_emoji', 'tadm_option_edit_custom_' . $item['id'])],
         [ticketButton('admin_toggle', 'tadm_option_toggle_' . $item['id'])],
@@ -1719,7 +1736,7 @@ function ticketHandleAdminUpdate()
     }
     $menuRow = ticketContentRow('admin_menu');
     $menuLabel = $menuRow
-        ? ticketButtonText(!empty($menuRow['emoji_key'])
+        ? ticketButtonText(!empty($menuRow['emoji_key']) && ticketStyledEmojiEnabled()
             ? $menuRow['value']
             : $menuRow['emoji'] . ' ' . $menuRow['value'])
         : '';
@@ -2118,12 +2135,12 @@ function ticketHandleUserUpdate()
     $reportRow = ticketContentRow('main_report');
     $mineRow = ticketContentRow('main_my_tickets');
     $reportLabel = $reportRow
-        ? ticketButtonText(!empty($reportRow['emoji_key'])
+        ? ticketButtonText(!empty($reportRow['emoji_key']) && ticketStyledEmojiEnabled()
             ? $reportRow['value']
             : $reportRow['emoji'] . ' ' . $reportRow['value'])
         : '';
     $mineLabel = $mineRow
-        ? ticketButtonText(!empty($mineRow['emoji_key'])
+        ? ticketButtonText(!empty($mineRow['emoji_key']) && ticketStyledEmojiEnabled()
             ? $mineRow['value']
             : $mineRow['emoji'] . ' ' . $mineRow['value'])
         : '';

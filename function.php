@@ -1832,7 +1832,9 @@ function languagechange($path_dir)
         $selectedLanguage = 'ru';
     }
     $values = $languageData[$selectedLanguage] ?? ($languageData['fa'] ?? []);
-    return function_exists('styledApplyLanguageOverrides')
+    return function_exists('styledCustomEmojiEnabled')
+        && styledCustomEmojiEnabled()
+        && function_exists('styledApplyLanguageOverrides')
         ? styledApplyLanguageOverrides($selectedLanguage, $values, $path_dir)
         : $values;
 }

@@ -17,4 +17,17 @@ $adminnumber = '{admin_number}';
 $domainhosts = '{domain_name}';
 $usernamebot = '{username_bot}';
 
+// Global Custom Emoji feature flag. Disabled by default.
+// Enable with the CUSTOM_EMOJI_ENABLED=true environment variable or by
+// defining the constant before this file is loaded.
+if (!defined('CUSTOM_EMOJI_ENABLED')) {
+    $customEmojiFeatureFlag = getenv('CUSTOM_EMOJI_ENABLED');
+    define(
+        'CUSTOM_EMOJI_ENABLED',
+        $customEmojiFeatureFlag !== false
+            ? filter_var($customEmojiFeatureFlag, FILTER_VALIDATE_BOOLEAN)
+            : false
+    );
+}
+
 ?>

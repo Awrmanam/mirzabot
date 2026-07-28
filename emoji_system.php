@@ -1,6 +1,17 @@
 <?php
 
-require_once __DIR__ . '/emoji_install.php';
+if (!defined('CUSTOM_EMOJI_ENABLED')) {
+    define('CUSTOM_EMOJI_ENABLED', false);
+}
+
+function styledCustomEmojiEnabled()
+{
+    return defined('CUSTOM_EMOJI_ENABLED') && CUSTOM_EMOJI_ENABLED === true;
+}
+
+if (styledCustomEmojiEnabled()) {
+    require_once __DIR__ . '/emoji_install.php';
+}
 
 /**
  * Central styling and Telegram Custom Emoji service.
@@ -14,6 +25,9 @@ function styledSystemReady()
 {
     global $pdo;
     static $ready = null;
+    if (!styledCustomEmojiEnabled()) {
+        return false;
+    }
     if ($ready !== null) {
         return $ready;
     }
@@ -45,6 +59,9 @@ function styledSetting($key, $default = '')
 function styledSetSetting($key, $value)
 {
     global $pdo;
+    if (!styledCustomEmojiEnabled() || !styledSystemReady()) {
+        return false;
+    }
     $stmt = $pdo->prepare("INSERT INTO styled_settings (setting_key, setting_value)
         VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
     return $stmt->execute([(string) $key, (string) $value]);
@@ -497,6 +514,16 @@ function styledParseRichText($template, $parseHtml, $context)
 function renderStyledText($template, $parseMode = 'HTML', $context = 'renderStyledText')
 {
     $template = (string) $template;
+    if (!styledCustomEmojiEnabled()) {
+        return [
+            'text' => $template,
+            'entities' => [],
+            'fallback_text' => $template,
+            'fallback_entities' => [],
+            'has_custom' => false,
+            'preserve_parse_mode' => true,
+        ];
+    }
     $normalizedMode = strtolower(trim((string) $parseMode));
     $containsStyledEmoji = preg_match('/\{emoji:[a-z0-9_]+\}|<tg-emoji\b/i', $template);
     if (!$containsStyledEmoji) {
@@ -568,7 +595,7 @@ function styledButtonIconKeyForText($buttonText)
 function buildStyledButton($text, array $action, $iconEmojiKey = '')
 {
     $button = array_merge(['text' => (string) $text], $action);
-    if ($iconEmojiKey !== '') {
+    if (styledCustomEmojiEnabled() && $iconEmojiKey !== '') {
         $button['icon_emoji_key'] = (string) $iconEmojiKey;
     }
     return $button;
@@ -637,6 +664,13 @@ function styledPrepareButton(array $button, $context)
 
 function styledPrepareReplyMarkup($replyMarkup, $context)
 {
+    if (!styledCustomEmojiEnabled()) {
+        return [
+            'primary' => $replyMarkup,
+            'fallback' => $replyMarkup,
+            'has_custom' => false,
+        ];
+    }
     $wasJson = is_string($replyMarkup);
     $markup = $wasJson ? json_decode($replyMarkup, true) : $replyMarkup;
     if (!is_array($markup)) {
@@ -683,6 +717,13 @@ function styledPrepareReplyMarkup($replyMarkup, $context)
 
 function styledPrepareTelegramRequest($method, array $datas)
 {
+    if (!styledCustomEmojiEnabled()) {
+        return [
+            'primary' => $datas,
+            'fallback' => $datas,
+            'has_custom' => false,
+        ];
+    }
     $primary = $datas;
     $fallback = $datas;
     $hasCustom = false;
@@ -737,6 +778,64 @@ function styledPrepareTelegramRequest($method, array $datas)
         'fallback' => $fallback,
         'has_custom' => $hasCustom,
     ];
+}
+
+function styledPrepareDisabledTelegramRequest(array $datas)
+{
+    unset($datas['icon_custom_emoji_id'], $datas['icon_emoji_key']);
+    foreach (['text', 'caption'] as $textField) {
+        if (!empty($datas[$textField]) && is_string($datas[$textField])
+            && strpos($datas[$textField], '<tg-emoji') !== false) {
+            $datas[$textField] = preg_replace(
+                '/<tg-emoji\b[^>]*>(.*?)<\/tg-emoji>/us',
+                '$1',
+                $datas[$textField]
+            );
+        }
+    }
+    foreach (['entities', 'caption_entities'] as $entitiesField) {
+        if (!isset($datas[$entitiesField])) {
+            continue;
+        }
+        $wasJson = is_string($datas[$entitiesField]);
+        $entities = $wasJson
+            ? json_decode($datas[$entitiesField], true)
+            : $datas[$entitiesField];
+        if (!is_array($entities)) {
+            continue;
+        }
+        $entities = array_values(array_filter($entities, function ($entity) {
+            return !is_array($entity) || ($entity['type'] ?? '') !== 'custom_emoji';
+        }));
+        if ($entities) {
+            $datas[$entitiesField] = $wasJson
+                ? json_encode($entities, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                : $entities;
+        } else {
+            unset($datas[$entitiesField]);
+        }
+    }
+    if (!empty($datas['reply_markup'])) {
+        $wasJson = is_string($datas['reply_markup']);
+        $replyMarkup = $wasJson ? json_decode($datas['reply_markup'], true) : $datas['reply_markup'];
+        if (is_array($replyMarkup)) {
+            $stripIcons = function (&$value) use (&$stripIcons) {
+                if (!is_array($value)) {
+                    return;
+                }
+                unset($value['icon_custom_emoji_id'], $value['icon_emoji_key']);
+                foreach ($value as &$child) {
+                    $stripIcons($child);
+                }
+                unset($child);
+            };
+            $stripIcons($replyMarkup);
+            $datas['reply_markup'] = $wasJson
+                ? json_encode($replyMarkup, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                : $replyMarkup;
+        }
+    }
+    return $datas;
 }
 
 function sendStyledMessage($chatId, $text, $replyMarkup = null, $parseMode = 'HTML', $botToken = null)

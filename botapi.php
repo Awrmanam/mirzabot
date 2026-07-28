@@ -5,13 +5,21 @@ function telegram($method, $datas = [], $token = null)
     global $APIKEY;
 
     $skipStyledRendering = !empty($datas['__styled_fallback']);
-    unset($datas['__styled_fallback']);
+    $fallbackAttempted = !empty($datas['__telegram_fallback_attempted']);
+    unset($datas['__styled_fallback'], $datas['__telegram_fallback_attempted']);
+    $customEmojiEnabled = function_exists('styledCustomEmojiEnabled')
+        && styledCustomEmojiEnabled();
+    if (!$customEmojiEnabled && function_exists('styledPrepareDisabledTelegramRequest')) {
+        $datas = styledPrepareDisabledTelegramRequest($datas);
+    }
     $styledPrepared = [
         'primary' => $datas,
         'fallback' => $datas,
         'has_custom' => false,
     ];
-    if (!$skipStyledRendering && function_exists('styledPrepareTelegramRequest')) {
+    if ($customEmojiEnabled
+        && !$skipStyledRendering
+        && function_exists('styledPrepareTelegramRequest')) {
         $styledPrepared = styledPrepareTelegramRequest($method, $datas);
         $datas = $styledPrepared['primary'];
     }
@@ -68,6 +76,10 @@ function telegram($method, $datas = [], $token = null)
     }
 
     if (isset($decodedResponse['ok']) && !$decodedResponse['ok']) {
+        if ($fallbackAttempted) {
+            error_log(json_encode($decodedResponse));
+            return $decodedResponse;
+        }
         $fallbackDatas = !empty($styledPrepared['has_custom'])
             ? $styledPrepared['fallback']
             : $datas;
@@ -104,6 +116,7 @@ function telegram($method, $datas = [], $token = null)
         }
         if ($fallbackChanged) {
             $fallbackDatas['__styled_fallback'] = 1;
+            $fallbackDatas['__telegram_fallback_attempted'] = 1;
             return telegram($method, $fallbackDatas, $token);
         }
         error_log(json_encode($decodedResponse));
