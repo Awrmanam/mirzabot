@@ -22,13 +22,36 @@ jobs:
           php -l panels.php
           php -l Marzban.php
           php -l botapi.php
+          php -l function.php
           php -l index.php
           php -l table.php
+          php -l emoji_install.php
+          php -l emoji_system.php
           php -l ticket_install.php
           php -l ticket_system.php
 
       - name: Validate installer syntax
         run: bash -n install.sh
+
+      - name: Validate styled emoji UTF-16 rendering
+        run: |
+          php -r '
+            $pdo = null;
+            $APIKEY = "";
+            require "emoji_system.php";
+            if (styledUtf16Length("💎") !== 2 || styledUtf16Length("A💎") !== 3) {
+                fwrite(STDERR, "UTF-16 length validation failed\n");
+                exit(1);
+            }
+            $rendered = renderStyledText("<b>A</b><tg-emoji emoji-id=\"5368324170671202286\">💎</tg-emoji>", "HTML", "ci");
+            $custom = array_values(array_filter($rendered["entities"], function ($entity) {
+                return $entity["type"] === "custom_emoji";
+            }));
+            if (count($custom) !== 1 || $custom[0]["offset"] !== 1 || $custom[0]["length"] !== 2) {
+                fwrite(STDERR, "Custom emoji entity validation failed\n");
+                exit(1);
+            }
+          '
 
       - name: Verify Rebecca integration and fork-pinned installer
         shell: bash
@@ -47,6 +70,20 @@ jobs:
           grep -Fq 'ticket_service_locks' ticket_system.php
           grep -Fq 'id_user = ?' ticket_system.php
           grep -Fq 'icon_custom_emoji_id' botapi.php
+          grep -Fq 'styledPrepareTelegramRequest' botapi.php
+          grep -Fq 'function styledUtf16Length' emoji_system.php
+          grep -Fq 'function renderStyledText' emoji_system.php
+          grep -Fq 'function buildStyledButton' emoji_system.php
+          grep -Fq 'function sendStyledMessage' emoji_system.php
+          grep -Fq 'function editStyledMessage' emoji_system.php
+          grep -Fq 'message.entities' emoji_system.php || grep -Fq "['entities', 'caption_entities']" emoji_system.php
+          grep -Fq 'icon_emoji_key' emoji_system.php
+          grep -Fq 'styled_emojis' emoji_install.php
+          grep -Fq 'styled_emoji_usage' emoji_install.php
+          grep -Fq 'styledApplyLanguageOverrides' function.php
+          grep -Fq 'styledHandleUpdate' index.php
+          grep -Fq 'styledEnhanceAdminKeyboard' keyboard.php
+          grep -Fq 'emoji_key' ticket_system.php
           grep -Fq 'ticket_install.php' table.php
           test "$(grep -Fc 'https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip' install.sh)" -eq 3
           grep -Fq 'https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh' install.sh
