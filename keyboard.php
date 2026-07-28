@@ -52,18 +52,38 @@ $datatextbot = array(
 
 );
 if ($table_exists) {
-    $textdatabot =  select("textbot", "*", null, null,"fetchAll");
+    $textdatabot = null;
+    $GLOBALS['styled_runtime_button_icon_map'] = [];
+    if (function_exists('styledSystemReady') && styledSystemReady()) {
+        try {
+            $textdatabot = $pdo->query(
+                "SELECT textbot.*,
+                        COALESCE(styled_button_icons.icon_emoji_key, '') AS styled_icon_emoji_key
+                 FROM textbot
+                 LEFT JOIN styled_button_icons
+                   ON styled_button_icons.source_type = 'textbot'
+                  AND styled_button_icons.source_key = textbot.id_text"
+            )->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $ignored) {
+            $textdatabot = null;
+        }
+    }
+    if (!is_array($textdatabot)) {
+        $textdatabot = select("textbot", "*", null, null, "fetchAll");
+    }
     $data_text_bot = array();
     foreach ($textdatabot as $row) {
         $data_text_bot[] = array(
             'id_text' => $row['id_text'],
             'text' => $row['text']
         );
+        if (!empty($row['styled_icon_emoji_key'])) {
+            $GLOBALS['styled_runtime_button_icon_map'][(string) $row['text']]
+                = (string) $row['styled_icon_emoji_key'];
+        }
     }
     foreach ($data_text_bot as $item) {
-        if (isset($datatextbot[$item['id_text']])) {
-            $datatextbot[$item['id_text']] = $item['text'];
-        }
+        $datatextbot[$item['id_text']] = $item['text'];
     }
 }
 $adminrulecheck = select("admin", "*", "id_admin", $from_id,"select");

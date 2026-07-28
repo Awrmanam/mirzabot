@@ -29,6 +29,10 @@ jobs:
           php -l emoji_system.php
           php -l ticket_install.php
           php -l ticket_system.php
+          php -l scripts/migrate_custom_emoji.php
+          php -l scripts/cleanup_custom_emoji_usage.php
+          php -l tests/custom_emoji_performance.php
+          php -l tests/performance_static_checks.php
 
       - name: Validate installer syntax
         run: bash -n install.sh
@@ -61,11 +65,18 @@ jobs:
             $source = "{emoji:brand} unchanged";
             $rendered = renderStyledText($source, "HTML", "ci-disabled");
             $button = buildStyledButton("Button", ["callback_data" => "noop"], "brand");
-            if ($rendered["text"] !== $source || isset($button["icon_emoji_key"])) {
+            if (strpos($rendered["text"], "{emoji:") !== false || isset($button["icon_emoji_key"])) {
                 fwrite(STDERR, "Disabled feature flag changed the legacy path\n");
                 exit(1);
             }
           '
+
+      - name: Validate Custom Emoji performance invariants
+        run: |
+          php tests/custom_emoji_performance.php disabled
+          php tests/custom_emoji_performance.php enabled
+          php tests/custom_emoji_performance.php usage
+          php tests/performance_static_checks.php
 
       - name: Verify Rebecca integration and fork-pinned installer
         shell: bash
@@ -98,6 +109,9 @@ jobs:
           grep -Fq 'icon_emoji_key' emoji_system.php
           grep -Fq 'styled_emojis' emoji_install.php
           grep -Fq 'styled_emoji_usage' emoji_install.php
+          grep -Fq 'MIRZA_CUSTOM_EMOJI_MIGRATION' scripts/migrate_custom_emoji.php
+          grep -Fq 'CUSTOM_EMOJI_USAGE_TRACKING' config.php
+          grep -Fq 'mirzaCronCommand' function.php
           grep -Fq 'styledApplyLanguageOverrides' function.php
           grep -Fq 'styledHandleUpdate' index.php
           grep -Fq 'styledEnhanceAdminKeyboard' keyboard.php

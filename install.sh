@@ -722,6 +722,14 @@ try { \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options); } catch (\P
 \$adminnumber = '${YOUR_CHAT_ID}';
 \$domainhosts = '${YOUR_DOMAIN}';
 \$usernamebot = '${YOUR_BOTNAME}';
+\$customEmojiFlag = getenv('CUSTOM_EMOJI_ENABLED');
+define('CUSTOM_EMOJI_ENABLED', \$customEmojiFlag !== false ? filter_var(\$customEmojiFlag, FILTER_VALIDATE_BOOLEAN) : false);
+\$customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
+define('CUSTOM_EMOJI_USAGE_TRACKING', \$customEmojiUsageFlag !== false ? filter_var(\$customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN) : false);
+\$appDebugFlag = getenv('APP_DEBUG');
+define('APP_DEBUG', \$appDebugFlag !== false ? filter_var(\$appDebugFlag, FILTER_VALIDATE_BOOLEAN) : false);
+\$configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
+define('MIRZA_MEMORY_LIMIT', preg_match('/^[1-9][0-9]*[KMG]$/i', \$configuredMemoryLimit) ? strtoupper(\$configuredMemoryLimit) : '256M');
 ?>
 EOF
             sleep 1
@@ -2654,6 +2662,14 @@ try { \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options); } catch (\P
 \$adminnumber = '${OLD_ADMIN_ID}';
 \$domainhosts = '${DOMAIN_NAME}';
 \$usernamebot = '${OLD_BOT_NAME}';
+\$customEmojiFlag = getenv('CUSTOM_EMOJI_ENABLED');
+define('CUSTOM_EMOJI_ENABLED', \$customEmojiFlag !== false ? filter_var(\$customEmojiFlag, FILTER_VALIDATE_BOOLEAN) : false);
+\$customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
+define('CUSTOM_EMOJI_USAGE_TRACKING', \$customEmojiUsageFlag !== false ? filter_var(\$customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN) : false);
+\$appDebugFlag = getenv('APP_DEBUG');
+define('APP_DEBUG', \$appDebugFlag !== false ? filter_var(\$appDebugFlag, FILTER_VALIDATE_BOOLEAN) : false);
+\$configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
+define('MIRZA_MEMORY_LIMIT', preg_match('/^[1-9][0-9]*[KMG]$/i', \$configuredMemoryLimit) ? strtoupper(\$configuredMemoryLimit) : '256M');
 ?>
 EOF
 

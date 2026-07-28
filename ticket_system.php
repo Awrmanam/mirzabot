@@ -88,28 +88,10 @@ function ticketButtonText($value)
 
 function ticketCustomEmojiIsValid($customEmojiId)
 {
-    static $cache = [];
-    if (!ticketStyledEmojiEnabled()) {
-        return false;
-    }
-    $customEmojiId = trim((string) $customEmojiId);
-    if ($customEmojiId === '' || !preg_match('/^[0-9]{10,32}$/', $customEmojiId)) {
-        return false;
-    }
-    if (array_key_exists($customEmojiId, $cache)) {
-        return $cache[$customEmojiId];
-    }
-    if (!function_exists('telegram')) {
-        return $cache[$customEmojiId] = false;
-    }
-    try {
-        $response = telegram('getCustomEmojiStickers', [
-            'custom_emoji_ids' => json_encode([$customEmojiId]),
-        ]);
-        return $cache[$customEmojiId] = !empty($response['ok']) && !empty($response['result'][0]);
-    } catch (Throwable $e) {
-        return $cache[$customEmojiId] = false;
-    }
+    // Legacy IDs are migrated to emoji_key by the explicit Custom Emoji
+    // migration. Unmigrated or unvalidated IDs must never trigger a network
+    // validation during message delivery.
+    return false;
 }
 
 function ticketRender($key, array $variables = [], $withEmoji = true)

@@ -30,4 +30,34 @@ if (!defined('CUSTOM_EMOJI_ENABLED')) {
     );
 }
 
+// Usage statistics are intentionally disabled by default. This flag only
+// controls statistics writes and never disables Custom Emoji rendering.
+if (!defined('CUSTOM_EMOJI_USAGE_TRACKING')) {
+    $customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
+    define(
+        'CUSTOM_EMOJI_USAGE_TRACKING',
+        $customEmojiUsageFlag !== false
+            ? filter_var($customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN)
+            : false
+    );
+}
+
+if (!defined('APP_DEBUG')) {
+    $appDebugFlag = getenv('APP_DEBUG');
+    define(
+        'APP_DEBUG',
+        $appDebugFlag !== false
+            ? filter_var($appDebugFlag, FILTER_VALIDATE_BOOLEAN)
+            : false
+    );
+}
+
+if (!defined('MIRZA_MEMORY_LIMIT')) {
+    $configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
+    if (!preg_match('/^[1-9][0-9]*[KMG]$/i', $configuredMemoryLimit)) {
+        $configuredMemoryLimit = '256M';
+    }
+    define('MIRZA_MEMORY_LIMIT', strtoupper($configuredMemoryLimit));
+}
+
 ?>

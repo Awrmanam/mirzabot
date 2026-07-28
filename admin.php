@@ -2547,8 +2547,12 @@ $caption";
                     error_log('Unable to locate crontab executable; cannot remove lottery cron job.');
                 } else {
                     $currentCronJobs = runShellCommand(sprintf('%s -l 2>/dev/null', escapeshellarg($crontabBinary)));
-                    $jobToRemove = "*/1 * * * * curl https://$domainhosts/cronbot/lottery.php";
-                    $newCronJobs = preg_replace('/' . preg_quote($jobToRemove, '/') . '/', '', (string) $currentCronJobs);
+                    $lotteryUrl = "https://$domainhosts/cronbot/lottery.php";
+                    $newCronJobs = preg_replace(
+                        '/^.*' . preg_quote($lotteryUrl, '/') . '.*(?:\r?\n|$)/m',
+                        '',
+                        (string) $currentCronJobs
+                    );
                     $tempCronFile = '/tmp/crontab.txt';
                     file_put_contents($tempCronFile, trim($newCronJobs) . PHP_EOL);
                     runShellCommand(sprintf('%s %s', escapeshellarg($crontabBinary), escapeshellarg($tempCronFile)));
@@ -2561,8 +2565,7 @@ $caption";
             }
             $valuenew = "0";
         } else {
-            $phpFilePath = "https://$domainhosts/cronbot/lottery.php";
-            $cronCommand = "*/1 * * * * curl $phpFilePath";
+            $cronCommand = mirzaCronCommand('*/1 * * * *', $domainhosts, 'lottery.php');
             if (!addCronIfNotExists($cronCommand)) {
                 error_log('Unable to register lottery cron job because shell_exec is unavailable.');
             }

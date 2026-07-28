@@ -9,10 +9,6 @@ function styledCustomEmojiEnabled()
     return defined('CUSTOM_EMOJI_ENABLED') && CUSTOM_EMOJI_ENABLED === true;
 }
 
-if (styledCustomEmojiEnabled()) {
-    require_once __DIR__ . '/emoji_install.php';
-}
-
 /**
  * Central styling and Telegram Custom Emoji service.
  *
@@ -28,14 +24,25 @@ function styledSystemReady()
     if (!styledCustomEmojiEnabled()) {
         return false;
     }
+    if (defined('MIRZA_TEST_MODE')
+        && MIRZA_TEST_MODE === true
+        && array_key_exists('styled_test_schema_ready', $GLOBALS)) {
+        return $GLOBALS['styled_test_schema_ready'] === true;
+    }
     if ($ready !== null) {
         return $ready;
     }
-    try {
-        $stmt = $pdo->query("SHOW TABLES LIKE 'styled_emojis'");
-        $ready = (bool) $stmt->fetchColumn();
-    } catch (Throwable $e) {
-        $ready = false;
+    $markerPath = __DIR__ . '/storage/cache/custom_emoji_schema.ready';
+    $ready = isset($pdo)
+        && $pdo instanceof PDO
+        && is_file($markerPath);
+    if (!$ready) {
+        styledLog(
+            'schema_not_ready',
+            '',
+            'runtime',
+            'Custom Emoji is enabled but its explicit migration marker is missing.'
+        );
     }
     return $ready;
 }
@@ -46,12 +53,23 @@ function styledSetting($key, $default = '')
     if (!styledSystemReady()) {
         return $default;
     }
+    $key = (string) $key;
+    if (!isset($GLOBALS['styled_runtime_settings'])
+        || !is_array($GLOBALS['styled_runtime_settings'])) {
+        $GLOBALS['styled_runtime_settings'] = [];
+    }
+    if (array_key_exists($key, $GLOBALS['styled_runtime_settings'])) {
+        $cachedValue = $GLOBALS['styled_runtime_settings'][$key];
+        return $cachedValue === null ? $default : $cachedValue;
+    }
     try {
         $stmt = $pdo->prepare("SELECT setting_value FROM styled_settings WHERE setting_key = ?");
-        $stmt->execute([(string) $key]);
+        $stmt->execute([$key]);
         $value = $stmt->fetchColumn();
+        $GLOBALS['styled_runtime_settings'][$key] = $value === false ? null : (string) $value;
         return $value === false ? $default : (string) $value;
     } catch (Throwable $e) {
+        $GLOBALS['styled_runtime_settings'][$key] = null;
         return $default;
     }
 }
@@ -64,7 +82,11 @@ function styledSetSetting($key, $value)
     }
     $stmt = $pdo->prepare("INSERT INTO styled_settings (setting_key, setting_value)
         VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-    return $stmt->execute([(string) $key, (string) $value]);
+    $result = $stmt->execute([(string) $key, (string) $value]);
+    if ($result) {
+        $GLOBALS['styled_runtime_settings'][(string) $key] = (string) $value;
+    }
+    return $result;
 }
 
 function styledEscape($value)
@@ -128,80 +150,363 @@ function styledUtf16Length($value)
 
 function styledLog($type, $emojiKey, $context, $message)
 {
-    global $pdo;
-    $safeMessage = styledLimit($message, 4000);
-    error_log('[Mirza Styled Emoji][' . $type . '] ' . $safeMessage);
-    if (!styledSystemReady() || styledSetting('unknown_key_logging', '1') !== '1') {
+    if (defined('MIRZA_TEST_MODE') && MIRZA_TEST_MODE === true) {
+        $GLOBALS['styled_test_logs'][] = [
+            'type' => (string) $type,
+            'emoji_key' => (string) $emojiKey,
+            'context' => (string) $context,
+        ];
         return;
     }
+    $type = preg_replace('/[^a-z0-9_-]/i', '', (string) $type);
+    $emojiKey = styledLimit(preg_replace('/[^a-z0-9_-]/i', '', (string) $emojiKey), 100);
+    $context = styledLimit(preg_replace('/[^a-z0-9:_-]/i', '', (string) $context), 120);
+    $rateKey = hash('sha256', $type . '|' . $emojiKey . '|' . $context);
+    $cacheDirectory = __DIR__ . '/storage/cache';
+    if (!is_dir($cacheDirectory)
+        && !mkdir($cacheDirectory, 0775, true)
+        && !is_dir($cacheDirectory)) {
+        return;
+    }
+    $cacheFile = $cacheDirectory . '/styled_log_rate.json';
+    $handle = @fopen($cacheFile, 'c+');
+    if ($handle === false) {
+        return;
+    }
+    $shouldLog = false;
     try {
-        $stmt = $pdo->prepare("INSERT INTO styled_emoji_logs
-            (log_type, emoji_key, context, message) VALUES (?, ?, ?, ?)");
-        $stmt->execute([
-            styledLimit($type, 80),
-            styledLimit($emojiKey, 100),
-            styledLimit($context, 190),
-            $safeMessage,
-        ]);
+        if (!flock($handle, LOCK_EX)) {
+            fclose($handle);
+            return;
+        }
+        rewind($handle);
+        $stored = json_decode((string) stream_get_contents($handle), true);
+        if (!is_array($stored)) {
+            $stored = [];
+        }
+        $now = time();
+        foreach ($stored as $key => $timestamp) {
+            if (!is_numeric($timestamp) || $now - (int) $timestamp > 3600) {
+                unset($stored[$key]);
+            }
+        }
+        if (!isset($stored[$rateKey]) || $now - (int) $stored[$rateKey] >= 300) {
+            $stored[$rateKey] = $now;
+            $shouldLog = true;
+        }
+        if (count($stored) > 200) {
+            asort($stored);
+            $stored = array_slice($stored, -200, null, true);
+        }
+        rewind($handle);
+        ftruncate($handle, 0);
+        fwrite($handle, json_encode($stored));
+        fflush($handle);
+        flock($handle, LOCK_UN);
+        fclose($handle);
     } catch (Throwable $ignored) {
+        @flock($handle, LOCK_UN);
+        @fclose($handle);
+        return;
+    }
+    if ($shouldLog) {
+        $detail = defined('APP_DEBUG') && APP_DEBUG
+            ? ' ' . styledLimit(preg_replace('/\s+/u', ' ', (string) $message), 500)
+            : '';
+        error_log('[Mirza Styled Emoji][' . $type . '][' . $emojiKey . '][' . $context . ']' . $detail);
     }
 }
 
 function styledRecordUsage($emojiKey, $sourceType, $sourceKey, $sourceLabel = '')
 {
+    if (!defined('CUSTOM_EMOJI_USAGE_TRACKING')
+        || CUSTOM_EMOJI_USAGE_TRACKING !== true
+        || !styledSystemReady()) {
+        return;
+    }
+    $emojiKey = trim((string) $emojiKey);
+    if (!preg_match('/^[a-z0-9_]{1,100}$/', $emojiKey)) {
+        return;
+    }
+    if (!isset($GLOBALS['styled_usage_buffer']) || !is_array($GLOBALS['styled_usage_buffer'])) {
+        $GLOBALS['styled_usage_buffer'] = [];
+    }
+    if (!isset($GLOBALS['styled_usage_shutdown_registered'])) {
+        $GLOBALS['styled_usage_shutdown_registered'] = true;
+        register_shutdown_function('styledFlushUsage');
+    }
+    if (!isset($GLOBALS['styled_usage_buffer'][$emojiKey])) {
+        $GLOBALS['styled_usage_buffer'][$emojiKey] = [
+            'count' => 0,
+            'source_type' => styledLimit($sourceType, 80),
+            'source_label' => styledLimit($sourceLabel, 120),
+        ];
+    }
+    $GLOBALS['styled_usage_buffer'][$emojiKey]['count']++;
+}
+
+function styledFlushUsage()
+{
     global $pdo;
-    if (!styledSystemReady() || styledSetting('usage_tracking', '1') !== '1') {
+    if (!defined('CUSTOM_EMOJI_USAGE_TRACKING')
+        || CUSTOM_EMOJI_USAGE_TRACKING !== true
+        || empty($GLOBALS['styled_usage_buffer'])) {
+        return;
+    }
+    $usageBuffer = $GLOBALS['styled_usage_buffer'];
+    $GLOBALS['styled_usage_buffer'] = [];
+    if (PHP_SAPI !== 'cli' && function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+    }
+    if (defined('MIRZA_TEST_MODE')
+        && MIRZA_TEST_MODE === true
+        && isset($GLOBALS['styled_test_usage_handler'])
+        && is_callable($GLOBALS['styled_test_usage_handler'])) {
+        call_user_func($GLOBALS['styled_test_usage_handler'], $usageBuffer);
+        return;
+    }
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
         return;
     }
     try {
         $stmt = $pdo->prepare("INSERT INTO styled_emoji_usage
-            (emoji_key, source_type, source_key, source_label)
-            VALUES (?, ?, ?, ?)
+            (emoji_key, source_type, source_key, source_label, use_count)
+            VALUES (?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
-                use_count = use_count + 1,
+                use_count = use_count + VALUES(use_count),
                 source_label = VALUES(source_label),
                 last_seen_at = CURRENT_TIMESTAMP");
-        $stmt->execute([
-            styledLimit($emojiKey, 100),
-            styledLimit($sourceType, 80),
-            styledLimit($sourceKey, 190),
-            styledLimit($sourceLabel, 255),
-        ]);
+        foreach ($usageBuffer as $emojiKey => $usage) {
+            $stmt->execute([
+                $emojiKey,
+                'request_aggregate',
+                $emojiKey,
+                $usage['source_label'],
+                max(1, (int) $usage['count']),
+            ]);
+        }
     } catch (Throwable $ignored) {
+        styledLog('usage_flush_failed', '', 'shutdown', $ignored->getMessage());
+    }
+}
+
+function styledFetchEmojiRows($sql, array $parameters)
+{
+    global $pdo;
+    if (defined('MIRZA_TEST_MODE')
+        && MIRZA_TEST_MODE === true
+        && isset($GLOBALS['styled_test_query_handler'])
+        && is_callable($GLOBALS['styled_test_query_handler'])) {
+        return (array) call_user_func($GLOBALS['styled_test_query_handler'], $sql, $parameters);
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($parameters);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function styledPreloadEmojiKeys(array $keys)
+{
+    global $pdo;
+    if (!styledCustomEmojiEnabled() || !styledSystemReady()) {
+        return;
+    }
+    if (!isset($GLOBALS['styled_runtime_emoji_cache'])
+        || !is_array($GLOBALS['styled_runtime_emoji_cache'])) {
+        $GLOBALS['styled_runtime_emoji_cache'] = [];
+    }
+    $keys = array_values(array_unique(array_filter(array_map(function ($key) {
+        $key = trim((string) $key);
+        return preg_match('/^[a-z0-9_]{1,100}$/', $key) ? $key : null;
+    }, $keys))));
+    $missing = array_values(array_filter($keys, function ($key) {
+        return !array_key_exists($key, $GLOBALS['styled_runtime_emoji_cache']);
+    }));
+    if (!$missing) {
+        return;
+    }
+    foreach ($missing as $key) {
+        $GLOBALS['styled_runtime_emoji_cache'][$key] = false;
+    }
+    try {
+        $placeholders = implode(',', array_fill(0, count($missing), '?'));
+        $rows = styledFetchEmojiRows(
+            "SELECT id, display_name, `key`, custom_emoji_id, fallback_emoji,
+                    is_active, is_valid, validated_at,
+                    COALESCE(NULLIF(fallback_emoji, ''), settings.setting_value, '')
+                        AS resolved_fallback
+             FROM styled_emojis
+             LEFT JOIN styled_settings settings
+               ON settings.setting_key = 'global_fallback'
+             WHERE `key` IN ({$placeholders})",
+            $missing
+        );
+        foreach ($rows as $row) {
+            $GLOBALS['styled_runtime_emoji_cache'][(string) $row['key']] = $row;
+            if (!isset($GLOBALS['styled_runtime_global_fallback'])
+                && isset($row['resolved_fallback'])) {
+                $GLOBALS['styled_runtime_global_fallback'] = (string) $row['resolved_fallback'];
+            }
+        }
+    } catch (Throwable $e) {
+        styledLog('library_query_failed', '', 'preload', $e->getMessage());
+    }
+}
+
+function styledCollectTextEmojiKeys($text)
+{
+    $keys = [];
+    if (is_string($text)
+        && preg_match_all('/\{emoji:([a-z0-9_]+)\}/', $text, $matches)) {
+        $keys = $matches[1];
+    }
+    return $keys;
+}
+
+function styledPreloadTelegramContext(array $datas)
+{
+    global $pdo;
+    if (!styledCustomEmojiEnabled() || !styledSystemReady()) {
+        return;
+    }
+    $keys = [];
+    foreach (['text', 'caption'] as $textField) {
+        if (isset($datas[$textField])) {
+            $keys = array_merge($keys, styledCollectTextEmojiKeys($datas[$textField]));
+        }
+    }
+    $buttonTexts = [];
+    if (isset($datas['reply_markup'])) {
+        $markup = is_string($datas['reply_markup'])
+            ? json_decode($datas['reply_markup'], true)
+            : $datas['reply_markup'];
+        if (is_array($markup)) {
+            foreach (['inline_keyboard', 'keyboard'] as $container) {
+                foreach ((array) ($markup[$container] ?? []) as $row) {
+                    foreach ((array) $row as $button) {
+                        if (!is_array($button)) {
+                            continue;
+                        }
+                        $buttonText = (string) ($button['text'] ?? '');
+                        $buttonKey = trim((string) ($button['icon_emoji_key'] ?? ''));
+                        $textKeys = styledCollectTextEmojiKeys($buttonText);
+                        if ($buttonKey !== '') {
+                            $keys[] = $buttonKey;
+                        } elseif ($textKeys) {
+                            $keys = array_merge($keys, $textKeys);
+                        } elseif ($buttonText !== '') {
+                            if (isset($GLOBALS['styled_runtime_button_icon_map'])
+                                && is_array($GLOBALS['styled_runtime_button_icon_map'])) {
+                                $mappedKey = trim((string) (
+                                    $GLOBALS['styled_runtime_button_icon_map'][$buttonText] ?? ''
+                                ));
+                                if ($mappedKey !== '') {
+                                    $keys[] = $mappedKey;
+                                }
+                            } else {
+                                $buttonTexts[] = $buttonText;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    $keys = array_values(array_unique(array_filter($keys, function ($key) {
+        return preg_match('/^[a-z0-9_]{1,100}$/', (string) $key);
+    })));
+    $buttonTexts = array_values(array_unique($buttonTexts));
+    if (!$keys && !$buttonTexts) {
+        return;
+    }
+    if (!isset($GLOBALS['styled_runtime_emoji_cache'])
+        || !is_array($GLOBALS['styled_runtime_emoji_cache'])) {
+        $GLOBALS['styled_runtime_emoji_cache'] = [];
+    }
+    if (!isset($GLOBALS['styled_runtime_button_icon_map'])
+        || !is_array($GLOBALS['styled_runtime_button_icon_map'])) {
+        $GLOBALS['styled_runtime_button_icon_map'] = [];
+    }
+    foreach ($keys as $key) {
+        if (!array_key_exists($key, $GLOBALS['styled_runtime_emoji_cache'])) {
+            $GLOBALS['styled_runtime_emoji_cache'][$key] = false;
+        }
+    }
+    foreach ($buttonTexts as $buttonText) {
+        if (!array_key_exists($buttonText, $GLOBALS['styled_runtime_button_icon_map'])) {
+            $GLOBALS['styled_runtime_button_icon_map'][$buttonText] = '';
+        }
+    }
+    $conditions = [];
+    $parameters = [];
+    if ($keys) {
+        $conditions[] = 'e.`key` IN (' . implode(',', array_fill(0, count($keys), '?')) . ')';
+        $parameters = array_merge($parameters, $keys);
+    }
+    if ($buttonTexts) {
+        $conditions[] = 't.text IN (' . implode(',', array_fill(0, count($buttonTexts), '?')) . ')';
+        $parameters = array_merge($parameters, $buttonTexts);
+    }
+    try {
+        $rows = styledFetchEmojiRows(
+            "SELECT e.id, e.display_name, e.`key`, e.custom_emoji_id,
+                    e.fallback_emoji, e.is_active, e.is_valid, e.validated_at,
+                    t.text AS mapped_button_text,
+                    COALESCE(NULLIF(e.fallback_emoji, ''), settings.setting_value, '')
+                        AS resolved_fallback
+             FROM styled_emojis e
+             LEFT JOIN styled_settings settings
+               ON settings.setting_key = 'global_fallback'
+             LEFT JOIN styled_button_icons bi
+               ON bi.icon_emoji_key = e.`key` AND bi.source_type = 'textbot'
+             LEFT JOIN textbot t ON t.id_text = bi.source_key
+             WHERE " . implode(' OR ', $conditions),
+            $parameters
+        );
+        foreach ($rows as $row) {
+            $GLOBALS['styled_runtime_emoji_cache'][(string) $row['key']] = $row;
+            if (!isset($GLOBALS['styled_runtime_global_fallback'])
+                && isset($row['resolved_fallback'])) {
+                $GLOBALS['styled_runtime_global_fallback'] = (string) $row['resolved_fallback'];
+            }
+            if (!empty($row['mapped_button_text'])) {
+                $GLOBALS['styled_runtime_button_icon_map'][(string) $row['mapped_button_text']]
+                    = (string) $row['key'];
+            }
+        }
+    } catch (Throwable $e) {
+        styledLog('library_query_failed', '', 'telegram_context', $e->getMessage());
     }
 }
 
 function styledEmojiByKey($key)
 {
-    global $pdo;
-    static $cache = [];
     $key = trim((string) $key);
     if (!preg_match('/^[a-z0-9_]{1,100}$/', $key) || !styledSystemReady()) {
         return false;
     }
-    if (array_key_exists($key, $cache)) {
-        return $cache[$key];
+    if (!isset($GLOBALS['styled_runtime_emoji_cache'])
+        || !array_key_exists($key, $GLOBALS['styled_runtime_emoji_cache'])) {
+        styledPreloadEmojiKeys([$key]);
     }
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM styled_emojis WHERE `key` = ? LIMIT 1");
-        $stmt->execute([$key]);
-        return $cache[$key] = $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        return $cache[$key] = false;
-    }
+    return $GLOBALS['styled_runtime_emoji_cache'][$key] ?? false;
 }
 
 function styledClearRuntimeCaches()
 {
-    // PHP requests are short lived. This function exists as a semantic hook for
-    // admin mutations and future long-running workers.
-    $GLOBALS['styled_runtime_cache_version'] = ($GLOBALS['styled_runtime_cache_version'] ?? 0) + 1;
+    $GLOBALS['styled_runtime_emoji_cache'] = [];
+    $GLOBALS['styled_runtime_settings'] = [];
+    $GLOBALS['styled_runtime_button_icon_map'] = null;
+    $GLOBALS['styled_runtime_ui_cache'] = [];
+    unset($GLOBALS['styled_runtime_global_fallback']);
 }
 
 function styledResolveEmoji($key, $context = '')
 {
     $row = styledEmojiByKey($key);
-    $globalFallback = styledSetting('global_fallback', '');
+    $environmentFallback = getenv('CUSTOM_EMOJI_DISABLED_FALLBACK');
+    $globalFallback = isset($GLOBALS['styled_runtime_global_fallback'])
+        ? (string) $GLOBALS['styled_runtime_global_fallback']
+        : ($environmentFallback !== false ? (string) $environmentFallback : '');
     if (!$row) {
         styledLog('unknown_key', $key, $context, 'Unknown emoji key {' . $key . '} was rendered.');
         return [
@@ -211,15 +516,14 @@ function styledResolveEmoji($key, $context = '')
             'usable' => false,
         ];
     }
-    $fallback = trim((string) $row['fallback_emoji']);
+    $fallback = trim((string) ($row['resolved_fallback'] ?? $row['fallback_emoji'] ?? ''));
     if ($fallback === '') {
         $fallback = $globalFallback;
     }
     $customId = trim((string) $row['custom_emoji_id']);
     $usable = (int) $row['is_active'] === 1
         && preg_match('/^[0-9]{5,64}$/', $customId)
-        && $row['is_valid'] !== '0'
-        && $row['is_valid'] !== 0;
+        && (int) $row['is_valid'] === 1;
     if (!$usable && (int) $row['is_active'] !== 1) {
         styledLog('inactive_key', $key, $context, 'Inactive emoji key {' . $key . '} used; fallback rendered.');
     }
@@ -234,6 +538,45 @@ function styledResolveEmoji($key, $context = '')
 function styledToken($key)
 {
     return '{emoji:' . (string) $key . '}';
+}
+
+function styledDisabledFallbackMap()
+{
+    static $fallbackMap = null;
+    if ($fallbackMap !== null) {
+        return $fallbackMap;
+    }
+    $fallbackMap = [];
+    if (defined('CUSTOM_EMOJI_STATIC_FALLBACKS')
+        && is_array(CUSTOM_EMOJI_STATIC_FALLBACKS)) {
+        $fallbackMap = CUSTOM_EMOJI_STATIC_FALLBACKS;
+    } else {
+        $encoded = getenv('CUSTOM_EMOJI_DISABLED_FALLBACKS');
+        $decoded = $encoded !== false ? json_decode($encoded, true) : null;
+        if (is_array($decoded)) {
+            $fallbackMap = $decoded;
+        }
+    }
+    return array_filter($fallbackMap, function ($value, $key) {
+        return preg_match('/^[a-z0-9_]{1,100}$/', (string) $key)
+            && is_string($value);
+    }, ARRAY_FILTER_USE_BOTH);
+}
+
+function styledReplaceDisabledTokens($text)
+{
+    $fallbackMap = styledDisabledFallbackMap();
+    $generalFallback = trim((string) getenv('CUSTOM_EMOJI_DISABLED_FALLBACK'));
+    $rendered = preg_replace_callback(
+        '/\{emoji:([^{}]+)\}/',
+        function ($match) use ($fallbackMap, $generalFallback) {
+            return array_key_exists($match[1], $fallbackMap)
+                ? (string) $fallbackMap[$match[1]]
+                : $generalFallback;
+        },
+        (string) $text
+    );
+    return is_string($rendered) ? $rendered : (string) $text;
 }
 
 function styledFlattenLanguageValues(array $values, $prefix = '')
@@ -272,28 +615,6 @@ function styledApplyLanguageOverrides($language, array $values, $sourcePath = ''
         return $values;
     }
     $language = preg_replace('/[^a-z0-9_-]/i', '', (string) $language);
-    $flat = styledFlattenLanguageValues($values);
-    $hash = hash('sha256', (string) $sourcePath . '|' . json_encode($flat, JSON_UNESCAPED_UNICODE));
-    $hashKey = 'language_seed_hash_' . $language;
-    if (styledSetting($hashKey, '') !== $hash) {
-        try {
-            $pdo->beginTransaction();
-            $stmt = $pdo->prepare("INSERT IGNORE INTO styled_text_overrides
-                (source_type, source_key, display_name, value, is_active)
-                VALUES ('language', ?, ?, ?, 1)");
-            foreach ($flat as $path => $value) {
-                $fullPath = $language . '.' . $path;
-                $stmt->execute([$fullPath, $fullPath, $value]);
-            }
-            styledSetSetting($hashKey, $hash);
-            $pdo->commit();
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            styledLog('language_seed_failed', '', 'language', $e->getMessage());
-        }
-    }
     try {
         $stmt = $pdo->prepare("SELECT source_key, value FROM styled_text_overrides
             WHERE source_type = 'language' AND is_active = 1 AND source_key LIKE ?");
@@ -397,7 +718,7 @@ function styledParseRichText($template, $parseHtml, $context)
 {
     $template = (string) $template;
     $parts = preg_split(
-        '/(\{emoji:[a-z0-9_]+\}|<[^>]+>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);)/u',
+        '/(\{emoji:[^{}]+\}|<[^>]+>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);)/u',
         $template,
         -1,
         PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY
@@ -409,16 +730,20 @@ function styledParseRichText($template, $parseHtml, $context)
     $plainText = '';
     $entities = [];
     $fallbackEntities = [];
-    $stack = [];
+    $utf16Offset = 0;
+    $openEntities = [];
+    $tagEntityIds = [];
+    $nextEntityId = 0;
     $hasCustom = false;
 
     foreach ($parts as $part) {
         if (preg_match('/^\{emoji:([a-z0-9_]+)\}$/', $part, $tokenMatch)) {
             $resolved = styledResolveEmoji($tokenMatch[1], $context);
-            $offset = styledUtf16Length($plainText);
+            $offset = $utf16Offset;
             $fallback = (string) $resolved['fallback'];
             $plainText .= $fallback;
             $length = styledUtf16Length($fallback);
+            $utf16Offset += $length;
             styledRecordUsage(
                 $tokenMatch[1],
                 'telegram_text',
@@ -436,28 +761,39 @@ function styledParseRichText($template, $parseHtml, $context)
             }
             continue;
         }
+        if (preg_match('/^\{emoji:([^{}]+)\}$/', $part, $invalidTokenMatch)) {
+            $fallback = trim((string) getenv('CUSTOM_EMOJI_DISABLED_FALLBACK'));
+            $plainText .= $fallback;
+            $utf16Offset += styledUtf16Length($fallback);
+            styledLog(
+                'invalid_key',
+                '',
+                $context,
+                'Invalid Custom Emoji key syntax was removed.'
+            );
+            continue;
+        }
 
         if ($parseHtml && strlen($part) > 1 && $part[0] === '<') {
             if (preg_match('/^<\s*br\s*\/?\s*>$/i', $part)) {
                 $plainText .= "\n";
+                $utf16Offset++;
                 continue;
             }
             if (preg_match('/^<\s*\/\s*([a-zA-Z0-9_-]+)\s*>$/', $part, $closeMatch)) {
                 $tagName = strtolower($closeMatch[1]);
-                for ($stackIndex = count($stack) - 1; $stackIndex >= 0; $stackIndex--) {
-                    if ($stack[$stackIndex]['tag'] !== $tagName) {
-                        continue;
+                if (!empty($tagEntityIds[$tagName])) {
+                    $entityId = array_pop($tagEntityIds[$tagName]);
+                    $open = $openEntities[$entityId] ?? null;
+                    unset($openEntities[$entityId]);
+                    if ($open) {
+                        styledAppendEntity($entities, $open, $utf16Offset);
+                        if ($open['type'] !== 'custom_emoji') {
+                            styledAppendEntity($fallbackEntities, $open, $utf16Offset);
+                        } else {
+                            $hasCustom = true;
+                        }
                     }
-                    $open = $stack[$stackIndex];
-                    array_splice($stack, $stackIndex, 1);
-                    $endOffset = styledUtf16Length($plainText);
-                    styledAppendEntity($entities, $open, $endOffset);
-                    if ($open['type'] !== 'custom_emoji') {
-                        styledAppendEntity($fallbackEntities, $open, $endOffset);
-                    } else {
-                        $hasCustom = true;
-                    }
-                    break;
                 }
                 continue;
             }
@@ -467,8 +803,10 @@ function styledParseRichText($template, $parseHtml, $context)
                 $definition = styledHtmlEntityDefinition($tagName, $attributes);
                 if ($definition) {
                     $definition['tag'] = $tagName;
-                    $definition['offset'] = styledUtf16Length($plainText);
-                    $stack[] = $definition;
+                    $definition['offset'] = $utf16Offset;
+                    $entityId = $nextEntityId++;
+                    $openEntities[$entityId] = $definition;
+                    $tagEntityIds[$tagName][] = $entityId;
                 }
                 continue;
             }
@@ -478,13 +816,13 @@ function styledParseRichText($template, $parseHtml, $context)
             ? html_entity_decode($part, ENT_QUOTES | ENT_HTML5, 'UTF-8')
             : $part;
         $plainText .= $decoded;
+        $utf16Offset += styledUtf16Length($decoded);
     }
 
-    $endOffset = styledUtf16Length($plainText);
-    foreach (array_reverse($stack) as $open) {
-        styledAppendEntity($entities, $open, $endOffset);
+    foreach (array_reverse($openEntities, true) as $open) {
+        styledAppendEntity($entities, $open, $utf16Offset);
         if ($open['type'] !== 'custom_emoji') {
-            styledAppendEntity($fallbackEntities, $open, $endOffset);
+            styledAppendEntity($fallbackEntities, $open, $utf16Offset);
         } else {
             $hasCustom = true;
         }
@@ -515,17 +853,18 @@ function renderStyledText($template, $parseMode = 'HTML', $context = 'renderStyl
 {
     $template = (string) $template;
     if (!styledCustomEmojiEnabled()) {
+        $disabledText = styledReplaceDisabledTokens($template);
         return [
-            'text' => $template,
+            'text' => $disabledText,
             'entities' => [],
-            'fallback_text' => $template,
+            'fallback_text' => $disabledText,
             'fallback_entities' => [],
             'has_custom' => false,
             'preserve_parse_mode' => true,
         ];
     }
     $normalizedMode = strtolower(trim((string) $parseMode));
-    $containsStyledEmoji = preg_match('/\{emoji:[a-z0-9_]+\}|<tg-emoji\b/i', $template);
+    $containsStyledEmoji = preg_match('/\{emoji:[^{}]+\}|<tg-emoji\b/i', $template);
     if (!$containsStyledEmoji) {
         return [
             'text' => $template,
@@ -536,10 +875,12 @@ function renderStyledText($template, $parseMode = 'HTML', $context = 'renderStyl
             'preserve_parse_mode' => true,
         ];
     }
+    styledPreloadEmojiKeys(styledCollectTextEmojiKeys($template));
     if ($normalizedMode !== '' && $normalizedMode !== 'html') {
         $fallbackText = preg_replace_callback('/\{emoji:([a-z0-9_]+)\}/', function ($match) use ($context) {
             return styledResolveEmoji($match[1], $context)['fallback'];
         }, $template);
+        $fallbackText = preg_replace('/\{emoji:[^{}]+\}/', '', (string) $fallbackText);
         styledLog(
             'parse_mode_fallback',
             '',
@@ -568,28 +909,16 @@ function renderStyledText($template, $parseMode = 'HTML', $context = 'renderStyl
 
 function styledButtonIconKeyForText($buttonText)
 {
-    global $pdo;
-    static $loaded = false;
-    static $map = [];
-    if (!$loaded) {
-        $loaded = true;
-        if (!styledSystemReady()) {
-            return '';
-        }
-        try {
-            $stmt = $pdo->query("SELECT textbot.text, styled_button_icons.icon_emoji_key
-                FROM styled_button_icons
-                INNER JOIN textbot
-                    ON styled_button_icons.source_type = 'textbot'
-                    AND styled_button_icons.source_key = textbot.id_text
-                WHERE styled_button_icons.icon_emoji_key <> ''");
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $map[(string) $row['text']] = (string) $row['icon_emoji_key'];
-            }
-        } catch (Throwable $ignored) {
-        }
+    $buttonText = (string) $buttonText;
+    if (!isset($GLOBALS['styled_runtime_button_icon_map'])
+        || !array_key_exists($buttonText, $GLOBALS['styled_runtime_button_icon_map'])) {
+        styledPreloadTelegramContext([
+            'reply_markup' => [
+                'keyboard' => [[['text' => $buttonText]]],
+            ],
+        ]);
     }
-    return $map[(string) $buttonText] ?? '';
+    return $GLOBALS['styled_runtime_button_icon_map'][$buttonText] ?? '';
 }
 
 function buildStyledButton($text, array $action, $iconEmojiKey = '')
@@ -612,8 +941,8 @@ function styledPrepareButton(array $button, $context)
         if ($iconKey === '') {
             $iconKey = $tokenMatch[1];
         }
-        $text = preg_replace('/\{emoji:[a-z0-9_]+\}\s*/', '', $text, 1);
     }
+    $text = preg_replace('/\{emoji:[^{}]+\}\s*/', '', $text);
     if ($iconKey === '') {
         $iconKey = styledButtonIconKeyForText($text);
     }
@@ -724,6 +1053,7 @@ function styledPrepareTelegramRequest($method, array $datas)
             'has_custom' => false,
         ];
     }
+    styledPreloadTelegramContext($datas);
     $primary = $datas;
     $fallback = $datas;
     $hasCustom = false;
@@ -782,8 +1112,19 @@ function styledPrepareTelegramRequest($method, array $datas)
 
 function styledPrepareDisabledTelegramRequest(array $datas)
 {
+    $topLevelIconKey = trim((string) ($datas['icon_emoji_key'] ?? ''));
+    if ($topLevelIconKey !== '' && isset($datas['text'])) {
+        $fallbackMap = styledDisabledFallbackMap();
+        $fallback = (string) ($fallbackMap[$topLevelIconKey] ?? '');
+        if ($fallback !== '') {
+            $datas['text'] = trim($fallback . ' ' . (string) $datas['text']);
+        }
+    }
     unset($datas['icon_custom_emoji_id'], $datas['icon_emoji_key']);
     foreach (['text', 'caption'] as $textField) {
+        if (isset($datas[$textField]) && is_string($datas[$textField])) {
+            $datas[$textField] = styledReplaceDisabledTokens($datas[$textField]);
+        }
         if (!empty($datas[$textField]) && is_string($datas[$textField])
             && strpos($datas[$textField], '<tg-emoji') !== false) {
             $datas[$textField] = preg_replace(
@@ -823,6 +1164,18 @@ function styledPrepareDisabledTelegramRequest(array $datas)
                 if (!is_array($value)) {
                     return;
                 }
+                $iconKey = trim((string) ($value['icon_emoji_key'] ?? ''));
+                if (isset($value['text']) && is_string($value['text'])) {
+                    $value['text'] = styledReplaceDisabledTokens($value['text']);
+                    if ($iconKey !== '') {
+                        $fallbackMap = styledDisabledFallbackMap();
+                        $fallback = trim((string) ($fallbackMap[$iconKey] ?? ''));
+                        if ($fallback !== ''
+                            && strpos(trim($value['text']), $fallback) !== 0) {
+                            $value['text'] = trim($fallback . ' ' . $value['text']);
+                        }
+                    }
+                }
                 unset($value['icon_custom_emoji_id'], $value['icon_emoji_key']);
                 foreach ($value as &$child) {
                     $stripIcons($child);
@@ -836,6 +1189,30 @@ function styledPrepareDisabledTelegramRequest(array $datas)
         }
     }
     return $datas;
+}
+
+function styledTelegramErrorAllowsEmojiFallback(array $response)
+{
+    $errorCode = (int) ($response['error_code'] ?? 0);
+    if ($errorCode === 429 || $errorCode >= 500 || $errorCode !== 400) {
+        return false;
+    }
+    $description = strtolower((string) ($response['description'] ?? ''));
+    if ($description === '') {
+        return false;
+    }
+    foreach ([
+        'custom emoji',
+        'custom_emoji',
+        'icon_custom_emoji_id',
+        'emoji id',
+        'button_type_invalid',
+    ] as $signature) {
+        if (strpos($description, $signature) !== false) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function sendStyledMessage($chatId, $text, $replyMarkup = null, $parseMode = 'HTML', $botToken = null)
@@ -942,28 +1319,35 @@ function styledUi($key, $default)
     if (!styledSystemReady()) {
         return (string) $default;
     }
+    $cacheKey = 'system_ui:' . (string) $key;
+    if (isset($GLOBALS['styled_runtime_ui_cache'])
+        && array_key_exists($cacheKey, $GLOBALS['styled_runtime_ui_cache'])) {
+        return $GLOBALS['styled_runtime_ui_cache'][$cacheKey];
+    }
     try {
-        $stmt = $pdo->prepare("INSERT IGNORE INTO styled_text_overrides
-            (source_type, source_key, display_name, value, is_active)
-            VALUES ('system_ui', ?, ?, ?, 1)");
-        $stmt->execute([(string) $key, (string) $key, (string) $default]);
         $stmt = $pdo->prepare("SELECT value, is_active FROM styled_text_overrides
             WHERE source_type = 'system_ui' AND source_key = ? LIMIT 1");
         $stmt->execute([(string) $key]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row && (int) $row['is_active'] === 1) {
-            return (string) $row['value'];
+            $value = (string) $row['value'];
+            $GLOBALS['styled_runtime_ui_cache'][$cacheKey] = $value;
+            return $value;
         }
     } catch (Throwable $ignored) {
     }
+    $GLOBALS['styled_runtime_ui_cache'][$cacheKey] = (string) $default;
     return (string) $default;
 }
 
 function styledIsAdmin($userId)
 {
-    global $pdo;
+    global $pdo, $admin_ids;
     if (!styledSystemReady() || (int) $userId === 0) {
         return false;
+    }
+    if (isset($admin_ids) && is_array($admin_ids)) {
+        return in_array((string) $userId, array_map('strval', $admin_ids), true);
     }
     try {
         $stmt = $pdo->prepare("SELECT id_admin FROM admin WHERE id_admin = ? LIMIT 1");
