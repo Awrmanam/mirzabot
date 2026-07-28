@@ -38,6 +38,7 @@ jobs:
           php -r '
             $pdo = null;
             $APIKEY = "";
+            define("CUSTOM_EMOJI_ENABLED", true);
             require "emoji_system.php";
             if (styledUtf16Length("💎") !== 2 || styledUtf16Length("A💎") !== 3) {
                 fwrite(STDERR, "UTF-16 length validation failed\n");
@@ -49,6 +50,19 @@ jobs:
             }));
             if (count($custom) !== 1 || $custom[0]["offset"] !== 1 || $custom[0]["length"] !== 2) {
                 fwrite(STDERR, "Custom emoji entity validation failed\n");
+              exit(1);
+            }
+          '
+          php -r '
+            $pdo = null;
+            $APIKEY = "";
+            define("CUSTOM_EMOJI_ENABLED", false);
+            require "emoji_system.php";
+            $source = "{emoji:brand} unchanged";
+            $rendered = renderStyledText($source, "HTML", "ci-disabled");
+            $button = buildStyledButton("Button", ["callback_data" => "noop"], "brand");
+            if ($rendered["text"] !== $source || isset($button["icon_emoji_key"])) {
+                fwrite(STDERR, "Disabled feature flag changed the legacy path\n");
                 exit(1);
             }
           '
@@ -71,6 +85,10 @@ jobs:
           grep -Fq 'id_user = ?' ticket_system.php
           grep -Fq 'icon_custom_emoji_id' botapi.php
           grep -Fq 'styledPrepareTelegramRequest' botapi.php
+          grep -Fq '__telegram_fallback_attempted' botapi.php
+          grep -Fq 'CUSTOM_EMOJI_ENABLED' config.php
+          grep -Fq 'function styledCustomEmojiEnabled' emoji_system.php
+          grep -Fq 'function styledPrepareDisabledTelegramRequest' emoji_system.php
           grep -Fq 'function styledUtf16Length' emoji_system.php
           grep -Fq 'function renderStyledText' emoji_system.php
           grep -Fq 'function buildStyledButton' emoji_system.php
