@@ -870,6 +870,8 @@ $paycount
 } elseif ($user['step'] == "getlimitedpanel") {
     savedata("save", "limitpanel", $text);
     $userdata = json_decode($user['Processing_value'], true);
+    $database_panel_type = $userdata['type'] == "rebecca" ? "marzban" : $userdata['type'];
+    $database_panel_version = $userdata['type'] == "rebecca" ? "2" : "0";
     $randomString = bin2hex(random_bytes(2));
     if ($userdata['type'] == "x-ui_single" || $userdata['type'] == "alireza") {
         $marzbanprotocol = $randomString;
@@ -925,7 +927,7 @@ $paycount
     $statusextend = "on_extend";
     $subvip = "offsubvip";
     $stauts_on_holed = "1";
-    $stmt = $pdo->prepare("INSERT INTO marzban_panel (code_panel,name_panel,sublink,config,MethodUsername,TestAccount,status,limit_panel,namecustom,Methodextend,type,conecton,inboundid,agent,inbound_deactive,inboundstatus,url_panel,username_panel,password_panel,time_usertest,val_usertest,linksubx,priceextravolume,priceextratime,pricecustomvolume,pricecustomtime,mainvolume,maxvolume,maintime,maxtime,status_extend,subvip,changeloc,customvolume,on_hold_test,version_panel) VALUES (:code_panel,:name_panel,:sublink,:config,:MethodUsername,:TestAccount,:status,:limit_panel,:namecustom,:Methodextend,:type,:conecton,:inboundid,:agent,:inbound_deactive,:inboundstatus,:url_panel,:username_panel,:password_panel,:val_usertest,:time_usertest,:linksubx,:priceextravolume,:priceextratime,:pricecustomvolume,:pricecustomtime,:mainvolume,:maxvolume,:maintime,:maxtime,:status_extend,:subvip,:changeloc,:customvolume,:on_hold_test,'0')");
+    $stmt = $pdo->prepare("INSERT INTO marzban_panel (code_panel,name_panel,sublink,config,MethodUsername,TestAccount,status,limit_panel,namecustom,Methodextend,type,conecton,inboundid,agent,inbound_deactive,inboundstatus,url_panel,username_panel,password_panel,time_usertest,val_usertest,linksubx,priceextravolume,priceextratime,pricecustomvolume,pricecustomtime,mainvolume,maxvolume,maintime,maxtime,status_extend,subvip,changeloc,customvolume,on_hold_test,version_panel) VALUES (:code_panel,:name_panel,:sublink,:config,:MethodUsername,:TestAccount,:status,:limit_panel,:namecustom,:Methodextend,:type,:conecton,:inboundid,:agent,:inbound_deactive,:inboundstatus,:url_panel,:username_panel,:password_panel,:val_usertest,:time_usertest,:linksubx,:priceextravolume,:priceextratime,:pricecustomvolume,:pricecustomtime,:mainvolume,:maxvolume,:maintime,:maxtime,:status_extend,:subvip,:changeloc,:customvolume,:on_hold_test,:version_panel)");
     $stmt->bindParam(':code_panel', $randomString);
     $stmt->bindParam(':name_panel', $userdata['namepanel'], PDO::PARAM_STR);
     $stmt->bindParam(':sublink', $sublink);
@@ -936,7 +938,7 @@ $paycount
     $stmt->bindParam(':limit_panel', $text);
     $stmt->bindParam(':namecustom', $namecustoms);
     $stmt->bindParam(':Methodextend', $extendtextadd);
-    $stmt->bindParam(':type', $userdata['type'], PDO::PARAM_STR);
+    $stmt->bindParam(':type', $database_panel_type, PDO::PARAM_STR);
     $stmt->bindParam(':conecton', $conecton);
     $stmt->bindParam(':inboundid', $inboundid);
     $stmt->bindParam(':agent', $agent);
@@ -961,6 +963,7 @@ $paycount
     $stmt->bindParam(':changeloc', $changeloc);
     $stmt->bindParam(':customvolume', $VALUE);
     $stmt->bindParam(':on_hold_test', $stauts_on_holed);
+    $stmt->bindParam(':version_panel', $database_panel_version);
     $stmt->execute();
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addedpanel'], $keyboardadmin, 'HTML');
     sendmessage($from_id, "🥳", $keyboardadmin, 'HTML');
@@ -9545,6 +9548,7 @@ f,n.n2", $backadmin, 'HTML');
                 $inbounds_to_store = array(
                     $service_protocol => array("setservice-" . intval($DataUserOut['service_id']))
                 );
+                update("marzban_panel", "version_panel", "2", "name_panel", $user['Processing_value']);
             }
             update("marzban_panel", "inbounds", json_encode($inbounds_to_store), "name_panel", $user['Processing_value']);
             update("marzban_panel", "proxies", json_encode($DataUserOut['proxies'], true), "name_panel", $user['Processing_value']);
@@ -10586,7 +10590,7 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         update("marzban_panel", "subvip", "offsubvip", "code_panel", $panel['code_panel']);
         $panel = select("marzban_panel", "*", "code_panel", $panel['code_panel'], "select");
     }
-    if (!in_array($panel['version_panel'], ['0', '1'])) {
+    if (!in_array($panel['version_panel'], ['0', '1', '2'])) {
         $panel['version_panel'] = '0';
     }
     $customvlume = json_decode($panel['customvolume'], true);
@@ -10644,7 +10648,8 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     ][$panel['on_hold_test']];
     $version_panel_status = [
         '1' => $textbotlang['Admin']['Status']['statuson'],
-        '0' => $textbotlang['Admin']['Status']['statusoff']
+        '0' => $textbotlang['Admin']['Status']['statusoff'],
+        '2' => 'Rebecca API'
     ][$panel['version_panel']];
     $Bot_Status = [
         'inline_keyboard' => [
@@ -10836,7 +10841,9 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         }
         update("marzban_panel", "on_hold_test", $valuenew, "code_panel", $code_panel);
     } elseif ($type == "versionpanel") {
-        if ($value == "1") {
+        if ($value == "2") {
+            $valuenew = "2";
+        } elseif ($value == "1") {
             $valuenew = "0";
         } else {
             $valuenew = "1";
@@ -10899,7 +10906,8 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     ][$panel['on_hold_test']];
     $version_panel_status = [
         '1' => $textbotlang['Admin']['Status']['statuson'],
-        '0' => $textbotlang['Admin']['Status']['statusoff']
+        '0' => $textbotlang['Admin']['Status']['statusoff'],
+        '2' => 'Rebecca API'
     ][$panel['version_panel']];
     $Bot_Status = [
         'inline_keyboard' => [

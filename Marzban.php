@@ -338,27 +338,33 @@ function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_l
         }
     // Rebecca exposes the legacy Marzban endpoints, but service-based users must
     // receive a numeric service_id instead of the legacy inbound selection.
-    $rebecca_service_id = isset($inbounds) ? rebecca_service_id_from_value($inbounds) : null;
-    if ($rebecca_service_id !== null) {
+    $is_rebecca_panel = isset($marzban_list_get['version_panel']) && $marzban_list_get['version_panel'] == "2";
+    $panel_inbounds = json_decode($marzban_list_get['inbounds'], true);
+    $rebecca_service_id = rebecca_service_id_from_value($panel_inbounds);
+    if ($rebecca_service_id === null && isset($inbounds)) {
+        $rebecca_service_id = rebecca_service_id_from_value($inbounds);
+    }
+    if ($is_rebecca_panel && $rebecca_service_id === null) {
+        return array(
+            "status" => 400,
+            "body" => json_encode(array(
+                "detail" => "Rebecca service_id is missing. Save the template username again in panel protocol settings."
+            ))
+        );
+    }
+    if ($is_rebecca_panel || $rebecca_service_id !== null) {
         $rebecca_data = array(
             "username" => $username_ac,
             "service_id" => $rebecca_service_id,
             "data_limit" => intval($data_limit),
-            "data_limit_reset_strategy" => $data_limit_reset,
-            "note" => $note
+            "expire" => $timestamp > 0 ? intval($timestamp) : 0
         );
-        $rebecca_proxies = json_decode($marzban_list_get['proxies'], true);
-        if (is_array($rebecca_proxies)) {
-            $rebecca_data["proxies"] = $rebecca_proxies;
-        }
         if (isset($data["status"]) && $data["status"] == "on_hold") {
             $rebecca_data["status"] = "on_hold";
             $rebecca_data["expire"] = 0;
             if (isset($data["on_hold_expire_duration"])) {
                 $rebecca_data["on_hold_expire_duration"] = intval($data["on_hold_expire_duration"]);
             }
-        } else {
-            $rebecca_data["expire"] = $timestamp > 0 ? intval($timestamp) : 0;
         }
         $data = $rebecca_data;
     }
@@ -370,6 +376,10 @@ function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_l
     $req->setHeaders($headers);
     $req->setBearerToken($Check_token['access_token']);
     $response = $req->post(json_encode($data));
+    if ($is_rebecca_panel && isset($response['status']) && intval($response['status']) >= 400) {
+        $safe_fields = implode(",", array_keys($data));
+        error_log("[Mirza Rebecca API] create user failed; status=" . intval($response['status']) . "; service_id=" . intval($rebecca_service_id) . "; fields=" . $safe_fields . "; response=" . substr((string) $response['body'], 0, 1000));
+    }
     return $response;
 }
 //----------------------------------
