@@ -30,5 +30,42 @@ jobs:
         run: |
           grep -Fq "'text' => \"ربکا\"" keyboard.php
           grep -Fq "'callback_data' => \"typepanel#marzban\"" keyboard.php
+          grep -Fq 'function rebecca_service_id_from_value' Marzban.php
+          grep -Fq '"service_id" => $rebecca_service_id' Marzban.php
+          grep -Fq '$inbounds_to_store = array(' admin.php
+          test "$(grep -Fc 'https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip' install.sh)" -eq 3
+          grep -Fq 'https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh' install.sh
+name: Rebecca support
+
+on:
+  push:
+    branches:
+      - rebecca-support
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate PHP syntax
+        run: |
+          php -l keyboard.php
+          php -l admin.php
+          php -l panels.php
+          php -l Marzban.php
+
+      - name: Validate installer syntax
+        run: bash -n install.sh
+
+      - name: Verify Rebecca integration and fork-pinned installer
+        shell: bash
+        run: |
+          grep -Fq "'text' => \"ربکا\"" keyboard.php
+          grep -Fq "'callback_data' => \"typepanel#marzban\"" keyboard.php
           test "$(grep -Fc 'https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip' install.sh)" -eq 3
           grep -Fq 'https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh' install.sh
