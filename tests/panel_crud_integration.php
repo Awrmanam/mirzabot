@@ -99,16 +99,31 @@ $insertPanel = function (string $name, string $code, array $entities = []) use (
 };
 
 $simpleId = $insertPanel('تهران', 'simple-code');
-$premiumId = $insertPanel('{emoji:premium} شیراز', 'premium-code', [[
+$premiumId = $insertPanel('🚀 شیراز', 'premium-code', [[
     'type' => 'custom_emoji',
+    'offset' => 0,
+    'length' => 2,
     'custom_emoji_id' => '5368324170671202286',
 ]]);
 $check($simpleId !== $premiumId, 'two distinct panels receive distinct canonical ids');
 
 $premium = $service->findActive($premiumId);
 $check($premium['display_name'] === 'شیراز', 'premium panel stores a plain display name');
-$check($premium['emoji_key'] === 'premium', 'premium token metadata is separate');
+$check($premium['normalized_name'] === 'شیراز', 'premium fallback glyph is excluded from identity');
 $check($premium['custom_emoji_id'] === '5368324170671202286', 'Telegram custom emoji id is separate');
+
+$mashhadId = $insertPanel('مشهد', 'mashhad-code');
+try {
+    $insertPanel('🚀 مشهد', 'premium-mashhad-code', [[
+        'type' => 'custom_emoji',
+        'offset' => 0,
+        'length' => 2,
+        'custom_emoji_id' => '5368324170671202286',
+    ]]);
+    $check(false, 'Custom Emoji entity cannot bypass normalized duplicate detection');
+} catch (PanelConflictException $e) {
+    $check($service->findActive($mashhadId) !== null, 'Custom Emoji entity cannot bypass normalized duplicate detection');
+}
 
 try {
     $insertPanel('  شيراز‌ ', 'duplicate-code');
@@ -120,6 +135,7 @@ try {
 $pdo->prepare('INSERT INTO invoice VALUES (?, ?, ?)')->execute(['inv-1', $premiumId, 'شیراز']);
 $pdo->prepare('INSERT INTO manualsell (panel_id, codepanel, contentrecord) VALUES (?, ?, ?)')
     ->execute([$premiumId, 'premium-code', 'historical sale']);
+$pdo->prepare('INSERT INTO product (panel_id, Location) VALUES (?, ?)')->execute([$premiumId, 'شیراز']);
 
 $renamed = $service->rename($premiumId, '{emoji:new-style} Shiraz 🚀');
 $check($renamed['display_name'] === 'Shiraz 🚀', 'rename operates by canonical id');
@@ -127,12 +143,20 @@ $check(
     $pdo->query("SELECT Service_location FROM invoice WHERE id_invoice = 'inv-1'")->fetchColumn() === 'شیراز',
     'rename preserves the invoice name snapshot'
 );
+$check(
+    $pdo->query('SELECT Location FROM product WHERE panel_id = ' . $premiumId)->fetchColumn() === '{emoji:new-style} Shiraz 🚀',
+    'rename updates operational products by canonical id'
+);
 
 $delete = $service->softDelete($premiumId);
 $check($delete['status'] === 'deleted', 'first delete commits one soft-deleted panel');
 $check($service->findActive($premiumId) === null, 'deleted panel is absent from active reads');
 $check((int) $pdo->query('SELECT COUNT(*) FROM invoice')->fetchColumn() === 1, 'delete preserves invoices');
 $check((int) $pdo->query('SELECT COUNT(*) FROM manualsell')->fetchColumn() === 1, 'delete preserves manual sales');
+$check(
+    $pdo->query('SELECT Location FROM product LIMIT 1')->fetchColumn() === '@deleted-panel:' . $premiumId,
+    'delete detaches products from the reusable display-name namespace'
+);
 
 $replay = $service->softDelete($premiumId);
 $check($replay['status'] === 'already_deleted', 'replayed delete is idempotent');

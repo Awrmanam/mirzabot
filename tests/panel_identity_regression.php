@@ -40,6 +40,15 @@ if (is_file($panelServicePath)) {
     $check($display['display_name'] === 'Tehran', 'display name is stored without the internal emoji token');
     $check($display['emoji_key'] === 'premium', 'Custom Emoji metadata is stored separately');
 
+    $entityDisplay = panelParseDisplayName('🚀 تهران', [[
+        'type' => 'custom_emoji',
+        'offset' => 0,
+        'length' => 2,
+        'custom_emoji_id' => '5368324170671202286',
+    ]]);
+    $check($entityDisplay['display_name'] === 'تهران', 'Telegram UTF-16 Custom Emoji entity is removed from identity');
+    $check($entityDisplay['normalized_name'] === 'تهران', 'Custom Emoji fallback glyph does not affect duplicate checks');
+
     $callback = panelCallbackData('confirm_delete', 123);
     $check($callback === 'panel:confirm_delete:123', 'panel callbacks use the canonical numeric id');
     $check(strlen($callback) <= 64, 'panel callback_data stays within Telegram 64-byte limit');

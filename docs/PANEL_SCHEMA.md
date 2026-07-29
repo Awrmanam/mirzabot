@@ -69,4 +69,6 @@ status deleted in one transaction. Therefore:
 - the panel disappears from active lists;
 - the same normalized name can be created again under a new canonical ID;
 - invoices and sales remain attached to their historical snapshot;
+- operational `product` rows are detached (`panel_id = NULL`) and their
+  legacy location is moved to an `@deleted-panel:<id>` tombstone namespace;
 - replaying the old callback cannot target the new panel.

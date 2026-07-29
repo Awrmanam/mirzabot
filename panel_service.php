@@ -45,7 +45,8 @@ function panelParseDisplayName(string $rawName, array $entities = []): array
         $emojiKey = $match[1];
     }
 
-    $displayName = preg_replace('/\{emoji:[A-Za-z0-9_.-]+\}/u', ' ', $rawName);
+    $displayName = panelRemoveCustomEmojiEntities($rawName, $entities);
+    $displayName = preg_replace('/\{emoji:[A-Za-z0-9_.-]+\}/u', ' ', $displayName);
     $displayName = preg_replace('/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2069}\x{FEFF}]/u', '', (string) $displayName);
     $displayName = trim((string) preg_replace('/[\p{Z}\s]+/u', ' ', (string) $displayName));
 
@@ -68,6 +69,63 @@ function panelParseDisplayName(string $rawName, array $entities = []): array
         'emoji_key' => $emojiKey,
         'custom_emoji_id' => $customEmojiId,
     ];
+}
+
+function panelRemoveCustomEmojiEntities(string $text, array $entities): string
+{
+    $characters = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY);
+    if (!is_array($characters)) {
+        return $text;
+    }
+
+    $unitToByte = [0 => 0];
+    $utf16Units = 0;
+    $byteOffset = 0;
+    foreach ($characters as $character) {
+        $first = ord($character[0]);
+        if (($first & 0x80) === 0) {
+            $codepoint = $first;
+        } elseif (($first & 0xE0) === 0xC0) {
+            $codepoint = (($first & 0x1F) << 6) | (ord($character[1]) & 0x3F);
+        } elseif (($first & 0xF0) === 0xE0) {
+            $codepoint = (($first & 0x0F) << 12)
+                | ((ord($character[1]) & 0x3F) << 6)
+                | (ord($character[2]) & 0x3F);
+        } else {
+            $codepoint = (($first & 0x07) << 18)
+                | ((ord($character[1]) & 0x3F) << 12)
+                | ((ord($character[2]) & 0x3F) << 6)
+                | (ord($character[3]) & 0x3F);
+        }
+
+        $unitLength = $codepoint > 0xFFFF ? 2 : 1;
+        $byteOffset += strlen($character);
+        $utf16Units += $unitLength;
+        $unitToByte[$utf16Units] = $byteOffset;
+    }
+
+    $ranges = [];
+    foreach ($entities as $entity) {
+        if (($entity['type'] ?? '') !== 'custom_emoji') {
+            continue;
+        }
+        $start = filter_var($entity['offset'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+        $length = filter_var($entity['length'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($start === false || $length === false || !isset($unitToByte[$start], $unitToByte[$start + $length])) {
+            continue;
+        }
+        $ranges[] = [
+            'offset' => $unitToByte[$start],
+            'length' => $unitToByte[$start + $length] - $unitToByte[$start],
+        ];
+    }
+
+    usort($ranges, static fn(array $left, array $right): int => $right['offset'] <=> $left['offset']);
+    foreach ($ranges as $range) {
+        $text = substr_replace($text, '', $range['offset'], $range['length']);
+    }
+
+    return $text;
 }
 
 function panelDisplayName(array $panel): string
@@ -236,7 +294,7 @@ class PanelService
         if ($identity['normalized_name'] === '') {
             throw new InvalidArgumentException('Panel name is empty after normalization');
         }
-        if ($this->normalizedNameExists($rawName)) {
+        if ($this->normalizedNameExists($identity['normalized_name'])) {
             throw new PanelConflictException('An active panel already uses this normalized name');
         }
 
@@ -267,7 +325,7 @@ class PanelService
             if ($identity['normalized_name'] === '') {
                 throw new InvalidArgumentException('Panel name is empty after normalization');
             }
-            if ($this->normalizedNameExists($rawName, $panelId)) {
+            if ($this->normalizedNameExists($identity['normalized_name'], $panelId)) {
                 throw new PanelConflictException('An active panel already uses this normalized name');
             }
 
@@ -376,6 +434,21 @@ class PanelService
             $stmt->execute([':panel_id' => $panelId]);
             if ($stmt->rowCount() !== 1) {
                 throw new RuntimeException('Panel deletion did not update exactly one active row');
+            }
+
+            // Product rows are operational mappings, not financial history.
+            // Move their legacy name out of the active namespace so a new
+            // panel with the same display name cannot inherit old products.
+            if ($this->tableHasColumn('product', 'panel_id')) {
+                $detachProducts = $this->pdo->prepare(
+                    "UPDATE product
+                     SET panel_id = NULL, Location = :deleted_location
+                     WHERE panel_id = :panel_id"
+                );
+                $detachProducts->execute([
+                    ':deleted_location' => '@deleted-panel:' . $panelId,
+                    ':panel_id' => $panelId,
+                ]);
             }
 
             if ($startedTransaction) {
