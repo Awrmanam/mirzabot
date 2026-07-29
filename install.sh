@@ -4,12 +4,12 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "\033[31m[ERROR]\033[0m Please run this script as \033[1mroot\033[0m."
     exit 1
 fi
-readonly MIRZA_SOURCE_BRANCH="premium-emoji-install-safety-step3-20260729"
+readonly MIRZA_SOURCE_REF="v1.0.0-premium-emoji"
 # Function to update the script itself automatically
 function self_update_script() {
     local MASTER_PATH="/root/install.sh"
     local BIN_LINK="/usr/local/bin/mirza"
-    local URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/${MIRZA_SOURCE_BRANCH}/install.sh"
+    local URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/${MIRZA_SOURCE_REF}/install.sh"
     local TEMP_FILE="/tmp/mirza_pro_update.sh"
     echo -e "\e[33mChecking for updates...\033[0m"
     wget -q -O "$TEMP_FILE" "$URL"
@@ -404,9 +404,9 @@ function install_bot() {
     }
     # CHANGED: Folder name to mirzaprobotconfig
     BOT_DIR="/var/www/html/mirzaprobotconfig"
-    # Download only from the pinned source branch.
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
-    echo -e "\033[33mDownloading Mirza Pro from the pinned branch...\033[0m"
+    # Download only from the pinned release tag.
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/tags/${MIRZA_SOURCE_REF}.zip"
+    echo -e "\033[33mDownloading Mirza Pro from the pinned release...\033[0m"
     # Download and extract the repository
     TEMP_DIR=$(mktemp -d /tmp/mirzaprobot.XXXXXX) || {
         echo -e "\e[91mError: Failed to create a temporary download directory.\033[0m"
@@ -1309,7 +1309,7 @@ function update_bot() {
         exit 1
     fi
     # Fetch the pinned version from GitHub.
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/tags/${MIRZA_SOURCE_REF}.zip"
     # Create temporary directory
     TEMP_DIR=$(mktemp -d /tmp/mirzaprobot_update.XXXXXX) || {
         echo -e "\e[91mError: Failed to create a temporary update directory.\033[0m"
@@ -2741,7 +2741,7 @@ function migrate_to_pro() {
 
     # Download Pro Source
     echo -e "\033[33mDownloading Mirza Pro Source...\033[0m"
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/tags/${MIRZA_SOURCE_REF}.zip"
     TEMP_DIR="/tmp/mirza_pro_mig"
     mkdir -p "$TEMP_DIR"
     wget -q -O "$TEMP_DIR/bot.zip" "$ZIP_URL"

@@ -90,6 +90,14 @@ To read the details, please refer to the link below.
 
 ## 🚀 Installation
 
+### Production installation
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/v1.0.0-premium-emoji/install.sh)
+```
+
+This installs the immutable `v1.0.0-premium-emoji` release.
+
 ### Prerequisites
 
 Ensure you have the following before installation:
@@ -98,10 +106,10 @@ Ensure you have the following before installation:
 
 ### 🔧 Installing the Bot (Stable Version)
 
-Run the following command in your server terminal:
+Run the following command to install `v1.0.0-premium-emoji`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh -o install.sh && sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/v1.0.0-premium-emoji/install.sh -o install.sh && sudo bash install.sh
 ```
 
 When prompted, **select option 1** to complete the installation.
@@ -127,12 +135,12 @@ enabled. Mirza calls the API endpoints directly.
 
 ## 🔄 updating bot
 
-To update your bot to the latest version, use the following command:
+To update your bot to `v1.0.0-premium-emoji`, use the following command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh -o install.sh && sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/v1.0.0-premium-emoji/install.sh -o install.sh && sudo bash install.sh
 ```
-When prompted, **select option update** to remove the bot.
+When prompted, **select option update** to update the bot.
 ---
 
 ## ❌ removing
@@ -140,7 +148,7 @@ When prompted, **select option update** to remove the bot.
 If you want to completely remove the bot from your server, run the following command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh -o install.sh && sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/v1.0.0-premium-emoji/install.sh -o install.sh && sudo bash install.sh
 ```
 
 When prompted, **select option 3** to remove the bot.

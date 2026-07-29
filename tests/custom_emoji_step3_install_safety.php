@@ -25,14 +25,28 @@ $install = $extractFunction($installer, 'install_bot');
 $update = $extractFunction($installer, 'update_bot');
 
 $check(
-    strpos($installer, 'readonly MIRZA_SOURCE_BRANCH="premium-emoji-install-safety-step3-20260729"') !== false,
-    'installer is pinned to the step-3 safety branch'
+    strpos($installer, 'readonly MIRZA_SOURCE_REF="v1.0.0-premium-emoji"') !== false,
+    'installer is pinned to the immutable production release'
+);
+$check(
+    substr_count($installer, 'archive/refs/tags/${MIRZA_SOURCE_REF}.zip') === 3
+        && strpos($installer, 'archive/refs/heads/') === false
+        && strpos($installer, 'MIRZA_SOURCE_BRANCH') === false,
+    'repository downloads use the production tag archive URL'
+);
+$check(
+    strpos($installer, 'raw.githubusercontent.com/Awrmanam/mirzabot/${MIRZA_SOURCE_REF}/install.sh') !== false,
+    'self-update uses the immutable production release'
 );
 $check($install !== '', 'install_bot function exists');
 $check($update !== '', 'update_bot function exists');
 $check(
     preg_match('/^\*\.sh text eol=lf$/m', $attributes) === 1,
     'shell scripts are normalized to LF'
+);
+$check(
+    preg_match('/^\*\.php text eol=lf$/m', $attributes) === 1,
+    'PHP scripts are normalized to LF'
 );
 
 $installDownload = strpos($install, 'wget -O "$TEMP_DIR/bot.zip"');
