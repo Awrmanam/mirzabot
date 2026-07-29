@@ -1736,7 +1736,7 @@ function install_bot() {
             echo -e "\e[91mError: Extracted source folder not found (bad or empty download).\033[0m"
             install_pause "Locating extracted files"
         fi
-        mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
+        cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
             echo -e "\e[91mError: Failed to move extracted files.\033[0m"
             install_pause "Moving bot files"
         }
@@ -2133,6 +2133,14 @@ EOF
         sleep 5
         run_step "Initializing database tables" "cd '$BOT_DIR' && php${PHP_VER} table.php" \
             || { show_step_error; install_pause "Initializing database tables"; }
+            if [ -f "$BOT_DIR/scripts/migrate_custom_emoji.php" ]; then
+    run_step "Initializing Custom Emoji system" \
+        "cd '$BOT_DIR' && php${PHP_VER} scripts/migrate_custom_emoji.php" \
+        || { show_step_error; install_pause "Initializing Custom Emoji system"; }
+else
+    echo -e "  ${C_BAD}●${CR} ${C_BAD}Custom Emoji migration file not found.${CR}"
+    install_pause "Custom Emoji migration file missing"
+fi
         mark_phase WEBHOOK
     fi
     # ╰─────────────────────────────────────────────────────────────╯
@@ -2231,7 +2239,7 @@ function update_bot() {
         exit 1
     }
     sudo mkdir -p "$BOT_DIR"
-    sudo mv "$EXTRACTED_DIR"/* "$BOT_DIR/" || {
+    sudo cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
         echo -e "\e[91mFile transfer failed!\033[0m"
         exit 1
     }
