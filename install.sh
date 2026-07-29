@@ -418,7 +418,7 @@ function install_bot() {
         exit 1
     fi
     # CHANGED: Always download from main branch (No releases for Pro)
-    ZIP_URL="https://github.com/mahdiMGF2/mirza_pro/archive/refs/heads/main.zip"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support-perf-final-20260729-022706.zip"
     echo -e "\033[33mDownloading Mirza Pro from Main Branch...\033[0m"
     # Download and extract the repository
     TEMP_DIR="/tmp/mirzaprobot"
@@ -1259,7 +1259,7 @@ function update_bot() {
         exit 1
     fi
     # Fetch latest version from GitHub (Always Main Branch for Pro)
-    ZIP_URL="https://github.com/mahdiMGF2/mirza_pro/archive/refs/heads/main.zip"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support-perf-final-20260729-022706.zip"
     # Create temporary directory
     TEMP_DIR="/tmp/mirzaprobot_update"
     mkdir -p "$TEMP_DIR"
@@ -2623,7 +2623,7 @@ function migrate_to_pro() {
 
     # Download Pro Source
     echo -e "\033[33mDownloading Mirza Pro Source...\033[0m"
-    ZIP_URL="https://github.com/mahdiMGF2/mirza_pro/archive/refs/heads/main.zip"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support-perf-final-20260729-022706.zip"
     TEMP_DIR="/tmp/mirza_pro_mig"
     mkdir -p "$TEMP_DIR"
     wget -q -O "$TEMP_DIR/bot.zip" "$ZIP_URL"
