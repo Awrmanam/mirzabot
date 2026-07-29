@@ -4,7 +4,7 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "\033[31m[ERROR]\033[0m Please run this script as \033[1mroot\033[0m."
     exit 1
 fi
-readonly MIRZA_SOURCE_BRANCH="premium-emoji-optimization-step1-20260729"
+readonly MIRZA_SOURCE_BRANCH="premium-emoji-optimization-step2-20260729"
 # Function to update the script itself automatically
 function self_update_script() {
     local MASTER_PATH="/root/install.sh"

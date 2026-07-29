@@ -8,44 +8,95 @@
  * rendering logic.
  */
 
+function &styledRuntimeCache()
+{
+    if (!isset($GLOBALS['styled_runtime_cache']) || !is_array($GLOBALS['styled_runtime_cache'])) {
+        $GLOBALS['styled_runtime_cache'] = [];
+    }
+    $defaults = [
+        'readiness_loaded' => false,
+        'system_ready' => false,
+        'settings_loaded' => false,
+        'settings' => [],
+        'setting_writes' => [],
+        'emojis_loaded' => false,
+        'emojis' => [],
+        'system_ui_loaded' => false,
+        'system_ui' => [],
+        'button_icons_loaded' => false,
+        'button_icons' => [],
+        'usage_buffer' => [],
+        'usage_shutdown_registered' => false,
+    ];
+    foreach ($defaults as $key => $value) {
+        if (!array_key_exists($key, $GLOBALS['styled_runtime_cache'])) {
+            $GLOBALS['styled_runtime_cache'][$key] = $value;
+        }
+    }
+    return $GLOBALS['styled_runtime_cache'];
+}
+
 function styledSystemReady()
 {
     global $pdo;
-    static $ready = null;
-    if ($ready !== null) {
-        return $ready;
+    $cache =& styledRuntimeCache();
+    if ($cache['readiness_loaded']) {
+        return $cache['system_ready'];
     }
+    $cache['readiness_loaded'] = true;
     try {
         $stmt = $pdo->query("SHOW TABLES LIKE 'styled_emojis'");
-        $ready = (bool) $stmt->fetchColumn();
+        $cache['system_ready'] = (bool) $stmt->fetchColumn();
     } catch (Throwable $e) {
-        $ready = false;
+        $cache['system_ready'] = false;
     }
-    return $ready;
+    return $cache['system_ready'];
 }
 
 function styledSetting($key, $default = '')
 {
     global $pdo;
+    $key = (string) $key;
+    $cache =& styledRuntimeCache();
+    if (array_key_exists($key, $cache['setting_writes'])) {
+        return $cache['setting_writes'][$key];
+    }
     if (!styledSystemReady()) {
         return $default;
     }
-    try {
-        $stmt = $pdo->prepare("SELECT setting_value FROM styled_settings WHERE setting_key = ?");
-        $stmt->execute([(string) $key]);
-        $value = $stmt->fetchColumn();
-        return $value === false ? $default : (string) $value;
-    } catch (Throwable $e) {
-        return $default;
+    if (!$cache['settings_loaded']) {
+        $cache['settings_loaded'] = true;
+        $cache['settings'] = [];
+        try {
+            $stmt = $pdo->query("SELECT setting_key, setting_value FROM styled_settings");
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $cache['settings'][(string) $row['setting_key']] = (string) $row['setting_value'];
+            }
+        } catch (Throwable $e) {
+            $cache['settings'] = [];
+        }
     }
+    return array_key_exists($key, $cache['settings'])
+        ? $cache['settings'][$key]
+        : $default;
 }
 
 function styledSetSetting($key, $value)
 {
     global $pdo;
+    $key = (string) $key;
+    $value = (string) $value;
     $stmt = $pdo->prepare("INSERT INTO styled_settings (setting_key, setting_value)
         VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-    return $stmt->execute([(string) $key, (string) $value]);
+    $success = $stmt->execute([$key, $value]);
+    if ($success) {
+        $cache =& styledRuntimeCache();
+        $cache['setting_writes'][$key] = $value;
+        if ($cache['settings_loaded']) {
+            $cache['settings'][$key] = $value;
+        }
+    }
+    return $success;
 }
 
 function styledEscape($value)
@@ -130,54 +181,146 @@ function styledLog($type, $emojiKey, $context, $message)
 
 function styledRecordUsage($emojiKey, $sourceType, $sourceKey, $sourceLabel = '')
 {
-    global $pdo;
     if (!styledSystemReady() || styledSetting('usage_tracking', '1') !== '1') {
         return;
     }
+    $emojiKey = styledLimit($emojiKey, 100);
+    $sourceType = styledLimit($sourceType, 80);
+    $sourceKey = styledLimit($sourceKey, 190);
+    $sourceLabel = styledLimit($sourceLabel, 255);
+    $tupleKey = serialize([$emojiKey, $sourceType, $sourceKey]);
+    $cache =& styledRuntimeCache();
+    if (!isset($cache['usage_buffer'][$tupleKey])) {
+        $cache['usage_buffer'][$tupleKey] = [
+            'emoji_key' => $emojiKey,
+            'source_type' => $sourceType,
+            'source_key' => $sourceKey,
+            'source_label' => $sourceLabel,
+            'count' => 0,
+        ];
+    } elseif ($sourceLabel !== '') {
+        $cache['usage_buffer'][$tupleKey]['source_label'] = $sourceLabel;
+    }
+    $cache['usage_buffer'][$tupleKey]['count']++;
+}
+
+function styledFlushUsageBuffer()
+{
+    global $pdo;
+    $cache =& styledRuntimeCache();
+    if (!$cache['usage_buffer']) {
+        return true;
+    }
+
+    $buffer = $cache['usage_buffer'];
+    $flushedKeys = [];
+    $transactionStarted = false;
+    try {
+        if (method_exists($pdo, 'beginTransaction')) {
+            $alreadyInTransaction = method_exists($pdo, 'inTransaction') && $pdo->inTransaction();
+            if (!$alreadyInTransaction) {
+                $transactionStarted = (bool) $pdo->beginTransaction();
+            }
+        }
+    } catch (Throwable $ignored) {
+        $transactionStarted = false;
+    }
+
     try {
         $stmt = $pdo->prepare("INSERT INTO styled_emoji_usage
-            (emoji_key, source_type, source_key, source_label)
-            VALUES (?, ?, ?, ?)
+            (emoji_key, source_type, source_key, source_label, use_count)
+            VALUES (?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
-                use_count = use_count + 1,
+                use_count = use_count + VALUES(use_count),
                 source_label = VALUES(source_label),
                 last_seen_at = CURRENT_TIMESTAMP");
-        $stmt->execute([
-            styledLimit($emojiKey, 100),
-            styledLimit($sourceType, 80),
-            styledLimit($sourceKey, 190),
-            styledLimit($sourceLabel, 255),
-        ]);
+        foreach ($buffer as $tupleKey => $entry) {
+            if (!$stmt->execute([
+                $entry['emoji_key'],
+                $entry['source_type'],
+                $entry['source_key'],
+                $entry['source_label'],
+                (int) $entry['count'],
+            ])) {
+                throw new RuntimeException('Unable to flush styled emoji usage.');
+            }
+            $flushedKeys[] = $tupleKey;
+        }
+        if ($transactionStarted && !$pdo->commit()) {
+            throw new RuntimeException('Unable to commit styled emoji usage.');
+        }
     } catch (Throwable $ignored) {
+        if ($transactionStarted) {
+            try {
+                if (!method_exists($pdo, 'inTransaction') || $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+            } catch (Throwable $rollbackIgnored) {
+            }
+            return false;
+        }
+        foreach ($flushedKeys as $tupleKey) {
+            unset($cache['usage_buffer'][$tupleKey]);
+        }
+        return false;
     }
+
+    foreach ($flushedKeys as $tupleKey) {
+        unset($cache['usage_buffer'][$tupleKey]);
+    }
+    return true;
+}
+
+function styledRegisterUsageShutdown()
+{
+    $cache =& styledRuntimeCache();
+    if ($cache['usage_shutdown_registered']) {
+        return;
+    }
+    register_shutdown_function('styledFlushUsageBuffer');
+    $cache['usage_shutdown_registered'] = true;
 }
 
 function styledEmojiByKey($key)
 {
     global $pdo;
-    static $cache = [];
     $key = trim((string) $key);
     if (!preg_match('/^[a-z0-9_]{1,100}$/', $key) || !styledSystemReady()) {
         return false;
     }
-    if (array_key_exists($key, $cache)) {
-        return $cache[$key];
+    $cache =& styledRuntimeCache();
+    if (!$cache['emojis_loaded']) {
+        $cache['emojis_loaded'] = true;
+        $cache['emojis'] = [];
+        try {
+            $stmt = $pdo->query("SELECT * FROM styled_emojis");
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $cache['emojis'][(string) $row['key']] = $row;
+            }
+        } catch (Throwable $e) {
+            $cache['emojis'] = [];
+        }
     }
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM styled_emojis WHERE `key` = ? LIMIT 1");
-        $stmt->execute([$key]);
-        return $cache[$key] = $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        return $cache[$key] = false;
-    }
+    return $cache['emojis'][$key] ?? false;
 }
 
 function styledClearRuntimeCaches()
 {
-    // PHP requests are short lived. This function exists as a semantic hook for
-    // admin mutations and future long-running workers.
-    $GLOBALS['styled_runtime_cache_version'] = ($GLOBALS['styled_runtime_cache_version'] ?? 0) + 1;
+    $cache =& styledRuntimeCache();
+    $cache['readiness_loaded'] = false;
+    $cache['system_ready'] = false;
+    $cache['settings_loaded'] = false;
+    $cache['settings'] = [];
+    $cache['setting_writes'] = [];
+    $cache['emojis_loaded'] = false;
+    $cache['emojis'] = [];
+    $cache['system_ui_loaded'] = false;
+    $cache['system_ui'] = [];
+    $cache['button_icons_loaded'] = false;
+    $cache['button_icons'] = [];
 }
+
+styledRegisterUsageShutdown();
 
 function styledResolveEmoji($key, $context = '')
 {
@@ -540,10 +683,10 @@ function renderStyledText($template, $parseMode = 'HTML', $context = 'renderStyl
 function styledButtonIconKeyForText($buttonText)
 {
     global $pdo;
-    static $loaded = false;
-    static $map = [];
-    if (!$loaded) {
-        $loaded = true;
+    $cache =& styledRuntimeCache();
+    if (!$cache['button_icons_loaded']) {
+        $cache['button_icons_loaded'] = true;
+        $cache['button_icons'] = [];
         if (!styledSystemReady()) {
             return '';
         }
@@ -555,12 +698,12 @@ function styledButtonIconKeyForText($buttonText)
                     AND styled_button_icons.source_key = textbot.id_text
                 WHERE styled_button_icons.icon_emoji_key <> ''");
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $map[(string) $row['text']] = (string) $row['icon_emoji_key'];
+                $cache['button_icons'][(string) $row['text']] = (string) $row['icon_emoji_key'];
             }
         } catch (Throwable $ignored) {
         }
     }
-    return $map[(string) $buttonText] ?? '';
+    return $cache['button_icons'][(string) $buttonText] ?? '';
 }
 
 function buildStyledButton($text, array $action, $iconEmojiKey = '')
@@ -838,24 +981,42 @@ function styledValidateCustomEmojiId($customEmojiId)
 function styledUi($key, $default)
 {
     global $pdo;
+    $key = (string) $key;
+    $default = (string) $default;
     if (!styledSystemReady()) {
-        return (string) $default;
+        return $default;
     }
+    $cache =& styledRuntimeCache();
+    if (!$cache['system_ui_loaded']) {
+        $cache['system_ui_loaded'] = true;
+        $cache['system_ui'] = [];
+        try {
+            $stmt = $pdo->query("SELECT source_key, value, is_active
+                FROM styled_text_overrides WHERE source_type = 'system_ui'");
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $cache['system_ui'][(string) $row['source_key']] = [
+                    'value' => (string) $row['value'],
+                    'is_active' => (int) $row['is_active'],
+                ];
+            }
+        } catch (Throwable $ignored) {
+            $cache['system_ui'] = [];
+        }
+    }
+    if (array_key_exists($key, $cache['system_ui'])) {
+        $row = $cache['system_ui'][$key];
+        return (int) $row['is_active'] === 1 ? (string) $row['value'] : $default;
+    }
+
+    $cache['system_ui'][$key] = ['value' => $default, 'is_active' => 1];
     try {
         $stmt = $pdo->prepare("INSERT IGNORE INTO styled_text_overrides
             (source_type, source_key, display_name, value, is_active)
             VALUES ('system_ui', ?, ?, ?, 1)");
-        $stmt->execute([(string) $key, (string) $key, (string) $default]);
-        $stmt = $pdo->prepare("SELECT value, is_active FROM styled_text_overrides
-            WHERE source_type = 'system_ui' AND source_key = ? LIMIT 1");
-        $stmt->execute([(string) $key]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row && (int) $row['is_active'] === 1) {
-            return (string) $row['value'];
-        }
+        $stmt->execute([$key, $key, $default]);
     } catch (Throwable $ignored) {
     }
-    return (string) $default;
+    return $default;
 }
 
 function styledIsAdmin($userId)
