@@ -1570,6 +1570,8 @@ function install_bot() {
         local _rc=$?
         if [ "$_rc" -eq 2 ]; then show_menu; return 0; fi
         if [ "$_rc" -ne 0 ]; then sleep 2; show_menu; return 1; fi
+        SRC_ZIP_URL="$CUSTOM_ZIP_URL"
+        SRC_LABEL="Arman Custom Emoji Build"
         state_set SRC_ZIP_URL "$SRC_ZIP_URL"
         state_set SRC_LABEL "$SRC_LABEL"
         echo ""
