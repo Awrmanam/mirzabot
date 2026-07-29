@@ -3,9 +3,18 @@
 /**
  * Central Custom Emoji schema and one-time migrations.
  *
- * This file is intentionally safe to include on every update. Destructive
- * changes are never performed and data migrations are guarded by a version.
+ * This file runs only from an explicitly authorized migration entrypoint.
+ * Destructive changes are never performed and data migrations are guarded by
+ * a version.
  */
+
+if (!defined('MIRZA_CUSTOM_EMOJI_MIGRATION') || MIRZA_CUSTOM_EMOJI_MIGRATION !== true) {
+    $GLOBALS['mirza_custom_emoji_migration_result'] = [
+        'ok' => false,
+        'message' => 'Explicit Custom Emoji migration authorization is required.',
+    ];
+    return;
+}
 
 try {
     if (!isset($pdo) || !($pdo instanceof PDO)) {
@@ -120,9 +129,10 @@ try {
 
     if ($schemaVersion < 1) {
         $tableExists = function ($tableName) use ($pdo) {
-            $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
             $stmt->execute([$tableName]);
-            return (bool) $stmt->fetchColumn();
+            return (int) $stmt->fetchColumn() > 0;
         };
         $columnExists = function ($tableName, $columnName) use ($pdo) {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS
@@ -208,6 +218,15 @@ try {
                 WHERE setting_key = 'schema_version'")->execute();
         }
     }
+
+    $GLOBALS['mirza_custom_emoji_migration_result'] = [
+        'ok' => true,
+        'message' => 'Custom Emoji schema is ready.',
+    ];
 } catch (Throwable $e) {
-    error_log('[Mirza Styled Emoji Install] ' . $e->getMessage());
+    $GLOBALS['mirza_custom_emoji_migration_result'] = [
+        'ok' => false,
+        'message' => $e->getMessage(),
+    ];
+    error_log('[Mirza Custom Emoji Migration] ' . $e->getMessage());
 }

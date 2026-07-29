@@ -1,7 +1,5 @@
 <?php
 
-require_once __DIR__ . '/emoji_install.php';
-
 /**
  * Central styling and Telegram Custom Emoji service.
  *

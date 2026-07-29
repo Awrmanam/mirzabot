@@ -4,11 +4,12 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "\033[31m[ERROR]\033[0m Please run this script as \033[1mroot\033[0m."
     exit 1
 fi
+readonly MIRZA_SOURCE_BRANCH="premium-emoji-optimization-step1-20260729"
 # Function to update the script itself automatically
 function self_update_script() {
     local MASTER_PATH="/root/install.sh"
     local BIN_LINK="/usr/local/bin/mirza"
-    local URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh"
+    local URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/${MIRZA_SOURCE_BRANCH}/install.sh"
     local TEMP_FILE="/tmp/mirza_pro_update.sh"
     echo -e "\e[33mChecking for updates...\033[0m"
     wget -q -O "$TEMP_FILE" "$URL"
@@ -417,9 +418,9 @@ function install_bot() {
         echo -e "\e[91mError: Failed to create directory $BOT_DIR.\033[0m"
         exit 1
     fi
-    # CHANGED: Always download from main branch (No releases for Pro)
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/premium-emoji-safe-test-20260729.zip"
-    echo -e "\033[33mDownloading Mirza Pro from Main Branch...\033[0m"
+    # Download only from the pinned source branch.
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
+    echo -e "\033[33mDownloading Mirza Pro from the pinned branch...\033[0m"
     # Download and extract the repository
     TEMP_DIR="/tmp/mirzaprobot"
     mkdir -p "$TEMP_DIR"
@@ -430,8 +431,8 @@ function install_bot() {
     unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
     # Find the extracted directory dynamically (usually mirza_pro-main)
     EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-    mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
-        echo -e "\e[91mError: Failed to move extracted files.\033[0m"
+    cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
+        echo -e "\e[91mError: Failed to copy extracted files.\033[0m"
         exit 1
     }
     rm -rf "$TEMP_DIR"
@@ -747,6 +748,10 @@ EOF
             curl -k --max-time 10 $url > /dev/null 2>&1 || {
                 echo -e "\e[93mWarning: Could not reach URL immediately, but installation may still be successful.\033[0m"
             }
+            php "$BOT_DIR/scripts/migrate_custom_emoji.php" || {
+                echo -e "\e[91mError: Custom Emoji migration failed. Installation cannot complete.\033[0m"
+                exit 1
+            }
             clear
             echo " "
             echo -e "\e[102mDomain Bot: https://${YOUR_DOMAIN}\033[0m"
@@ -997,11 +1002,11 @@ EOF
 #         exit 1
 #     }
 #     # Download bot files
-#     ZIP_URL=$(curl -s https://api.github.com/repos/mahdiMGF2/botmirzapanel/releases/latest | grep "zipball_url" | cut -d '"' -f 4)
+#     # Legacy upstream source selection removed.
 #     if [[ "$1" == "-v" && "$2" == "beta" ]] || [[ "$1" == "-beta" ]] || [[ "$1" == "-" && "$2" == "beta" ]]; then
-#         ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/heads/main.zip"
+#         # Legacy beta source removed.
 #     elif [[ "$1" == "-v" && -n "$2" ]]; then
-#         ZIP_URL="https://github.com/mahdiMGF2/botmirzapanel/archive/refs/tags/$2.zip"
+#         # Legacy tagged source removed.
 #     fi
 #     TEMP_DIR="/tmp/mirzabot"
 #     mkdir -p "$TEMP_DIR"
@@ -1014,7 +1019,7 @@ EOF
 #         exit 1
 #     }
 #     EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-#     mv "$EXTRACTED_DIR"/* "$BOT_DIR" || {
+#     cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
 #         echo -e "\e[91mError: Failed to move bot files.\033[0m"
 #         exit 1
 #     }
@@ -1258,8 +1263,8 @@ function update_bot() {
         echo -e "\e[91mError: Mirza Pro Bot is not installed. Please install it first.\033[0m"
         exit 1
     fi
-    # Fetch latest version from GitHub (Always Main Branch for Pro)
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/premium-emoji-safe-test-20260729.zip"
+    # Fetch the pinned version from GitHub.
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
     # Create temporary directory
     TEMP_DIR="/tmp/mirzaprobot_update"
     mkdir -p "$TEMP_DIR"
@@ -1276,7 +1281,7 @@ function update_bot() {
     CONFIG_PATH="$BOT_DIR/config.php"
     TEMP_CONFIG="/root/mirzapro_config_backup.php"
     if [ -f "$CONFIG_PATH" ]; then
-        cp "$CONFIG_PATH" "$TEMP_CONFIG" || {
+        cp -a "$CONFIG_PATH" "$TEMP_CONFIG" || {
             echo -e "\e[91mConfig file backup failed!\033[0m"
             exit 1
         }
@@ -1290,7 +1295,7 @@ function update_bot() {
     }
     # Move new files
     sudo mkdir -p "$BOT_DIR"
-    sudo mv "$EXTRACTED_DIR"/* "$BOT_DIR/" || {
+    sudo cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
         echo -e "\e[91mFile transfer failed!\033[0m"
         exit 1
     }
@@ -1301,6 +1306,10 @@ function update_bot() {
             exit 1
         }
     fi
+    php "$BOT_DIR/scripts/migrate_custom_emoji.php" || {
+        echo -e "\e[91mCustom Emoji migration failed! Update cannot complete.\033[0m"
+        exit 1
+    }
     # Copy the new install.sh to /root/ to ensure script self-update works next time
     if [ -f "$BOT_DIR/install.sh" ]; then
         sudo cp "$BOT_DIR/install.sh" /root/install.sh
@@ -1955,7 +1964,7 @@ function remove_bot() {
 #     # Clone a Fresh Copy of the Bot's Source Code
 #     BOT_DIR="/var/www/html/$BOT_NAME"
 #     echo -e "\033[33mCloning bot's source code...\033[0m"
-#     git clone https://github.com/mahdiMGF2/botmirzapanel.git "$BOT_DIR" || {
+#     # Legacy upstream clone source removed.
 #         echo -e "\033[31mError: Failed to clone the repository.\033[0m"
 #         return 1
 #     }
@@ -2099,7 +2108,7 @@ function remove_bot() {
 #         return 1
 #     fi
 #     # Clone the new version of the bot
-#     if ! git clone https://github.com/mahdiMGF2/botmirzapanel.git "$BOT_PATH"; then
+#     # Legacy upstream clone source removed.
 #         echo -e "\033[31mFailed to clone the repository. Exiting...\033[0m"
 #         return 1
 #     fi
@@ -2623,13 +2632,13 @@ function migrate_to_pro() {
 
     # Download Pro Source
     echo -e "\033[33mDownloading Mirza Pro Source...\033[0m"
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/premium-emoji-safe-test-20260729.zip"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
     TEMP_DIR="/tmp/mirza_pro_mig"
     mkdir -p "$TEMP_DIR"
     wget -q -O "$TEMP_DIR/bot.zip" "$ZIP_URL"
     unzip -q "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
     EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-    mv "$EXTRACTED_DIR"/* "$NEW_BOT_DIR"
+    cp -a "$EXTRACTED_DIR"/. "$NEW_BOT_DIR"/
     rm -rf "$TEMP_DIR"
 
     # 10. Generate New Config File
