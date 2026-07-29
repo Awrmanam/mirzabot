@@ -822,7 +822,7 @@ $paycount
     deletemessage($from_id, $message_id);
     savedata("clear", "type", $typepanel);
 } elseif ($user['step'] == "add_name_panel") {
-    if (in_array($text, $marzban_list)) {
+    if (styledPanelNameExists($text)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
         return;
     }
@@ -4250,6 +4250,12 @@ $text_expie_agent
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['getloc'], $json_list_marzban_panel, 'HTML');
     step('GetLocationEdit', $from_id);
 } elseif ($user['step'] == "GetLocationEdit") {
+    $resolvedPanelName = styledResolvePanelName($text);
+    if ($resolvedPanelName === false) {
+        sendmessage($from_id, "❌ پنل انتخاب‌شده پیدا نشد. لطفاً دوباره تلاش کنید.", $backadmin, 'HTML');
+        return;
+    }
+    $text = $resolvedPanelName;
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $text, "select");
     if ($marzban_list_get['type'] == "marzban") {
         $Check_token = token_panel($marzban_list_get['code_panel'], false);
@@ -4453,7 +4459,7 @@ $text_expie_agent
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['GetNameNew'], $backadmin, 'HTML');
     step('GetNameNew', $from_id);
 } elseif ($user['step'] == "GetNameNew") {
-    if (in_array($text, $marzban_list)) {
+    if (styledPanelNameExists($text, $user['Processing_value'])) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
         return;
     }
@@ -4606,11 +4612,11 @@ $text_expie_agent
     step('confirmremovepanel', $from_id);
 } elseif ($user['step'] == "confirmremovepanel") {
     if ($text == "تایید") {
-        sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], $keyboardadmin, 'HTML');
-        $marzban = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
-        $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE name_panel = :name_panel");
-        $stmt->bindParam(':name_panel', $user['Processing_value'], PDO::PARAM_STR);
-        $stmt->execute();
+        if (styledDeletePanelByName($user['Processing_value'])) {
+            sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], $keyboardadmin, 'HTML');
+        } else {
+            sendmessage($from_id, "❌ پنل حذف نشد؛ رکوردی پیدا نشد. لطفاً دوباره تلاش کنید.", $keyboardadmin, 'HTML');
+        }
     }
     step('home', $from_id);
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managruser'] || $datain == "backlistuser") {

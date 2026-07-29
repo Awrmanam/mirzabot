@@ -360,6 +360,77 @@ function styledToken($key)
     return '{emoji:' . (string) $key . '}';
 }
 
+function styledPanelDisplayName($storedName)
+{
+    $storedName = (string) $storedName;
+    if (strpos($storedName, '{emoji:') === false) {
+        return $storedName;
+    }
+    [$button] = styledPrepareButton(
+        ['text' => $storedName],
+        'panel_management_name'
+    );
+    return (string) ($button['text'] ?? $storedName);
+}
+
+function styledResolvePanelName($receivedName)
+{
+    global $pdo;
+    $receivedName = (string) $receivedName;
+    $stmt = $pdo->prepare("SELECT name_panel FROM marzban_panel WHERE name_panel = ? LIMIT 1");
+    $stmt->execute([$receivedName]);
+    $exactName = $stmt->fetchColumn();
+    if ($exactName !== false) {
+        return (string) $exactName;
+    }
+    $stmt = $pdo->prepare("SELECT name_panel FROM marzban_panel");
+    $stmt->execute();
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $panel) {
+        $storedName = (string) $panel['name_panel'];
+        if (styledPanelDisplayName($storedName) === $receivedName) {
+            return $storedName;
+        }
+    }
+    return false;
+}
+
+function styledPanelNameExists($candidateName, $excludeStoredName = '')
+{
+    global $pdo;
+    $candidateName = (string) $candidateName;
+    $candidateDisplay = styledPanelDisplayName($candidateName);
+    $stmt = $pdo->prepare("SELECT name_panel FROM marzban_panel");
+    $stmt->execute();
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $panel) {
+        $storedName = (string) $panel['name_panel'];
+        if ($storedName === (string) $excludeStoredName) {
+            continue;
+        }
+        $storedDisplay = styledPanelDisplayName($storedName);
+        if ($candidateName === $storedName || $candidateName === $storedDisplay
+            || $candidateDisplay === $storedName || $candidateDisplay === $storedDisplay) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function styledDeletePanelByName($storedName)
+{
+    global $pdo;
+    $deleted = false;
+    try {
+        $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE name_panel = ?");
+        $deleted = $stmt->execute([(string) $storedName]) && $stmt->rowCount() > 0;
+    } catch (Throwable $ignored) {
+    }
+    if (!$deleted) {
+        error_log('[Mirza Panel] Delete affected no rows; panel_hash='
+            . hash('sha256', (string) $storedName));
+    }
+    return $deleted;
+}
+
 function styledFlattenLanguageValues(array $values, $prefix = '')
 {
     $flat = [];
@@ -722,11 +793,16 @@ function styledPrepareButton(array $button, $context)
     $iconKey = trim((string) ($button['icon_emoji_key'] ?? ''));
     unset($button['icon_emoji_key'], $fallbackButton['icon_emoji_key']);
 
-    if (preg_match('/\{emoji:([a-z0-9_]+)\}/', $text, $tokenMatch)) {
+    if (preg_match('/\{emoji:([a-z0-9_]+)\}\s*/', $text, $tokenMatch, PREG_OFFSET_CAPTURE)) {
         if ($iconKey === '') {
-            $iconKey = $tokenMatch[1];
+            $iconKey = $tokenMatch[1][0];
         }
-        $text = preg_replace('/\{emoji:[a-z0-9_]+\}\s*/', '', $text, 1);
+        $text = substr_replace(
+            $text,
+            '',
+            $tokenMatch[0][1],
+            strlen($tokenMatch[0][0])
+        );
     }
     if ($iconKey === '') {
         $iconKey = styledButtonIconKeyForText($text);
