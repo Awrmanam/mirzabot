@@ -55,11 +55,11 @@ $check(
     'panel deletion never targets a display name'
 );
 $check(
-    strpos($admin, 'panel:select:') !== false,
+    strpos($admin, "panelParseCallbackData(\$datain)") !== false,
     'panel management selection uses an inline canonical-id callback'
 );
 $check(
-    strpos($admin, 'panel:confirm_delete:') !== false,
+    strpos($admin, "panelCallbackData('confirm_delete'") !== false,
     'panel deletion confirmation binds the canonical id'
 );
 $check(

@@ -486,30 +486,26 @@ $result = $stmt->fetchAll();
 $table_exists = count($result) > 0;
 $namepanel = [];
 if ($table_exists) {
-    $stmt = $pdo->prepare("SELECT * FROM marzban_panel");
-    $stmt->execute();
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $namepanel[] = [$row['name_panel']];
-    }
+    $panelIdentityService = new PanelService($pdo);
+    $activePanels = $panelIdentityService->listActive();
     $list_marzban_panel = [
-        'keyboard' => [],
-        'resize_keyboard' => true,
+        'inline_keyboard' => [],
     ];
-    foreach ($namepanel as $button) {
-        $list_marzban_panel['keyboard'][] = [
-            ['text' => $button[0]]
+    foreach ($activePanels as $panel) {
+        $list_marzban_panel['inline_keyboard'][] = [
+            [
+                'text' => panelDisplayName($panel),
+                'callback_data' => panelCallbackData('select', (int) $panel['id']),
+            ]
         ];
     }
-        $list_marzban_panel['keyboard'][] = [
-        ['text' => $textbotlang['Admin']['backadmin']],
-        ['text' => $textbotlang['Admin']['backmenu']]
+    $list_marzban_panel['inline_keyboard'][] = [
+        ['text' => $textbotlang['Admin']['backadmin'], 'callback_data' => 'admin']
     ];
     $json_list_marzban_panel = json_encode($list_marzban_panel);
 //------------------  [ list panel inline ]----------------//
-    $stmt = $pdo->prepare("SELECT * FROM marzban_panel");
-    $stmt->execute();
     $list_marzban_panel_edit_product = ['inline_keyboard' => []];
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    foreach ($activePanels as $row) {
         $list_marzban_panel_edit_product['inline_keyboard'][] = [['text' =>$row['name_panel'],'callback_data' => 'locationedit_'.$row['code_panel']]];
     }
     $list_marzban_panel_edit_product['inline_keyboard'][] = [['text' =>"همه پنل ها",'callback_data' => 'locationedit_all']];

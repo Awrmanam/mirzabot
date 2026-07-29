@@ -15,6 +15,7 @@ $text_panel_admin_login_template = "💎 | Version Bot: $version
 if (!in_array($from_id, $admin_ids))
     return;
 
+$panelService = new PanelService($pdo);
 $domainhostsEscaped = htmlspecialchars($domainhosts, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
 $miniAppInstructionText = <<<HTML
@@ -77,7 +78,7 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     }
     step('home', $from_id);
     if (in_array($user['step'], ["updatetime", "val_usertest", "getlimitnew", "GetusernameNew", "GeturlNew", "protocolset", "updatemethodusername", "GetNameNew", "getprotocol", "getprotocolremove", "GetpaawordNew", "updateextendmethod", "setpricechangelocation"])) {
-        $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+        $typepanel = $panelService->resolveSelection($user['Processing_value']);
         outtypepanel($typepanel['type'], $textbotlang['Admin']['Back-menu']);
     } elseif (in_array($user['step'], ["selectloc", "get_limit", "selectlocedite", "GetPriceExtra", "GetPriceexstratime", "GetPricecustomtime", "GetPricecustomvolume", "get_code", "get_codesell", "minbalancebulk"])) {
         sendmessage($from_id, $textbotlang['Admin']['Back-menu'], $shopkeyboard, 'HTML');
@@ -822,12 +823,22 @@ $paycount
     deletemessage($from_id, $message_id);
     savedata("clear", "type", $typepanel);
 } elseif ($user['step'] == "add_name_panel") {
-    if (in_array($text, $marzban_list)) {
+    if (!panelIdentitySchemaReady($pdo)) {
+        sendmessage($from_id, "Panel identity migration is required before creating a panel.", $backadmin, 'HTML');
+        return;
+    }
+    try {
+        $panelIdentity = $panelService->identityColumns($text, $message_entities);
+    } catch (PanelConflictException $e) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
+        return;
+    } catch (InvalidArgumentException $e) {
+        sendmessage($from_id, "Panel name is empty or invalid.", $backadmin, 'HTML');
         return;
     }
     $userdata = json_decode($user['Processing_value'], true);
     savedata("save", "namepanel", $text);
+    savedata("save", "panel_identity", $panelIdentity);
     if ($userdata['type'] == "Manualsale") {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['getlimitedpanel'], $backadmin, 'HTML');
         step('getlimitedpanel', $from_id);
@@ -872,7 +883,7 @@ $paycount
     $userdata = json_decode($user['Processing_value'], true);
     $database_panel_type = $userdata['type'] == "rebecca" ? "marzban" : $userdata['type'];
     $database_panel_version = $userdata['type'] == "rebecca" ? "2" : "0";
-    $randomString = bin2hex(random_bytes(2));
+    $randomString = bin2hex(random_bytes(8));
     if ($userdata['type'] == "x-ui_single" || $userdata['type'] == "alireza") {
         $marzbanprotocol = $randomString;
         $protocols = "vmess";
@@ -927,9 +938,15 @@ $paycount
     $statusextend = "on_extend";
     $subvip = "offsubvip";
     $stauts_on_holed = "1";
-    $stmt = $pdo->prepare("INSERT INTO marzban_panel (code_panel,name_panel,sublink,config,MethodUsername,TestAccount,status,limit_panel,namecustom,Methodextend,type,conecton,inboundid,agent,inbound_deactive,inboundstatus,url_panel,username_panel,password_panel,time_usertest,val_usertest,linksubx,priceextravolume,priceextratime,pricecustomvolume,pricecustomtime,mainvolume,maxvolume,maintime,maxtime,status_extend,subvip,changeloc,customvolume,on_hold_test,version_panel) VALUES (:code_panel,:name_panel,:sublink,:config,:MethodUsername,:TestAccount,:status,:limit_panel,:namecustom,:Methodextend,:type,:conecton,:inboundid,:agent,:inbound_deactive,:inboundstatus,:url_panel,:username_panel,:password_panel,:val_usertest,:time_usertest,:linksubx,:priceextravolume,:priceextratime,:pricecustomvolume,:pricecustomtime,:mainvolume,:maxvolume,:maintime,:maxtime,:status_extend,:subvip,:changeloc,:customvolume,:on_hold_test,:version_panel)");
+    $panelIdentity = $userdata['panel_identity'] ?? panelParseDisplayName((string) $userdata['namepanel']);
+    $stmt = $pdo->prepare("INSERT INTO marzban_panel (code_panel,name_panel,display_name,normalized_name,active_normalized_name,emoji_key,custom_emoji_id,sublink,config,MethodUsername,TestAccount,status,limit_panel,namecustom,Methodextend,type,conecton,inboundid,agent,inbound_deactive,inboundstatus,url_panel,username_panel,password_panel,time_usertest,val_usertest,linksubx,priceextravolume,priceextratime,pricecustomvolume,pricecustomtime,mainvolume,maxvolume,maintime,maxtime,status_extend,subvip,changeloc,customvolume,on_hold_test,version_panel) VALUES (:code_panel,:name_panel,:display_name,:normalized_name,:active_normalized_name,:emoji_key,:custom_emoji_id,:sublink,:config,:MethodUsername,:TestAccount,:status,:limit_panel,:namecustom,:Methodextend,:type,:conecton,:inboundid,:agent,:inbound_deactive,:inboundstatus,:url_panel,:username_panel,:password_panel,:val_usertest,:time_usertest,:linksubx,:priceextravolume,:priceextratime,:pricecustomvolume,:pricecustomtime,:mainvolume,:maxvolume,:maintime,:maxtime,:status_extend,:subvip,:changeloc,:customvolume,:on_hold_test,:version_panel)");
     $stmt->bindParam(':code_panel', $randomString);
     $stmt->bindParam(':name_panel', $userdata['namepanel'], PDO::PARAM_STR);
+    $stmt->bindValue(':display_name', $panelIdentity['display_name'], PDO::PARAM_STR);
+    $stmt->bindValue(':normalized_name', $panelIdentity['normalized_name'], PDO::PARAM_STR);
+    $stmt->bindValue(':active_normalized_name', $panelIdentity['normalized_name'], PDO::PARAM_STR);
+    $stmt->bindValue(':emoji_key', $panelIdentity['emoji_key'], $panelIdentity['emoji_key'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $stmt->bindValue(':custom_emoji_id', $panelIdentity['custom_emoji_id'], $panelIdentity['custom_emoji_id'] === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $stmt->bindParam(':sublink', $sublink);
     $stmt->bindParam(':config', $configstatus);
     $stmt->bindParam(':MethodUsername', $MethodUsername);
@@ -964,7 +981,21 @@ $paycount
     $stmt->bindParam(':customvolume', $VALUE);
     $stmt->bindParam(':on_hold_test', $stauts_on_holed);
     $stmt->bindParam(':version_panel', $database_panel_version);
-    $stmt->execute();
+    try {
+        $pdo->beginTransaction();
+        $stmt->execute();
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Panel insert did not create exactly one row');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('panel create failed: ' . $e->getMessage());
+        sendmessage($from_id, "Panel creation failed; no changes were committed.", $backadmin, 'HTML');
+        return;
+    }
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addedpanel'], $keyboardadmin, 'HTML');
     sendmessage($from_id, "🥳", $keyboardadmin, 'HTML');
     step("home", $from_id);
@@ -4131,8 +4162,8 @@ $text_expie_agent
     sendmessage($from_id, $text_username, $MethodUsername, 'HTML');
     step('updatemethodusername', $from_id);
 } elseif ($user['step'] == "updatemethodusername") {
-    update("marzban_panel", "MethodUsername", $text, "name_panel", $user['Processing_value']);
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panelService->updateSelectedField($user['Processing_value'], "MethodUsername", $text);
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     if ($text == "متن دلخواه + عدد رندوم" || $text == "متن دلخواه + عدد ترتیبی" || $text == "متن دلخواه نماینده + عدد ترتیبی") {
         step('getnamecustom', $from_id);
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['customnamesend'], $backadmin, 'HTML');
@@ -4150,9 +4181,9 @@ $text_expie_agent
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['invalidname'], $backadmin, 'html');
         return;
     }
-    update("marzban_panel", "namecustom", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "namecustom", $text);
     step('home', $from_id);
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['savedname']);
 } elseif (($datain == "cartsetting" && $adminrulecheck['rule'] == "administrator") || $text == "▶️ بازگشت به منوی تظنیمات کارت") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $CartManage, 'HTML');
@@ -4248,13 +4279,25 @@ $text_expie_agent
     step('home', $from_id);
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managementpanel'] && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['getloc'], $json_list_marzban_panel, 'HTML');
-    step('GetLocationEdit', $from_id);
-} elseif ($user['step'] == "GetLocationEdit") {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $text, "select");
+    step('home', $from_id);
+} elseif (
+    ($panelCallback = panelParseCallbackData($datain)) !== null
+    && $panelCallback['action'] === 'select'
+    && $adminrulecheck['rule'] == "administrator"
+) {
+    $marzban_list_get = $panelService->findActive($panelCallback['panel_id']);
+    if (!$marzban_list_get) {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'Panel is no longer active.',
+            'show_alert' => true,
+        ]);
+        return;
+    }
     if ($marzban_list_get['type'] == "marzban") {
         $Check_token = token_panel($marzban_list_get['code_panel'], false);
         if (isset($Check_token['access_token'])) {
-            $System_Stats = Get_System_Stats($text);
+            $System_Stats = Get_System_Stats($marzban_list_get['name_panel']);
             if ($marzban_list_get['version_panel'] == "1") {
                 $active_users = $System_Stats['active_users']
                     ?? $System_Stats['users_active']
@@ -4354,7 +4397,7 @@ $text_expie_agent
     } elseif ($marzban_list_get['type'] == "marzneshin") {
         $Check_token = token_panelm($marzban_list_get['code_panel']);
         if (isset($Check_token['access_token'])) {
-            $System_Stats = Get_System_Statsm($text);
+        $System_Stats = Get_System_Statsm($marzban_list_get['name_panel']);
             if (!empty($System_Stats['status']) && $System_Stats['status'] != 200) {
                 $text_marzban = "❌ خطایی در دریافت اطلاعات رخ داده است کد خطا : " . $System_Stats['status'];
                 sendmessage($from_id, $text_marzban, $optionMarzban, 'HTML');
@@ -4447,23 +4490,33 @@ $text_expie_agent
     } else {
         sendmessage($from_id, "یک گزینه را انتخاب نمایید", $optionMarzban, 'HTML');
     }
-    update("user", "Processing_value", $text, "id", $from_id);
+    update("user", "Processing_value", (string) $marzban_list_get['id'], "id", $from_id);
     step('home', $from_id);
 } elseif ($text == "✍️ نام پنل" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['GetNameNew'], $backadmin, 'HTML');
     step('GetNameNew', $from_id);
 } elseif ($user['step'] == "GetNameNew") {
-    if (in_array($text, $marzban_list)) {
-        sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
+    $selectedPanelId = filter_var($user['Processing_value'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($selectedPanelId === false) {
+        sendmessage($from_id, "Panel selection expired. Select the panel again.", $keyboardadmin, 'HTML');
+        step('home', $from_id);
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    try {
+        $typepanel = $panelService->findActive((int) $selectedPanelId);
+        if (!$typepanel) {
+            throw new PanelNotFoundException('Panel is not active');
+        }
+        $panelService->rename((int) $selectedPanelId, $text, $message_entities);
+    } catch (PanelConflictException $e) {
+        sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
+        return;
+    } catch (Throwable $e) {
+        error_log('panel rename handler failed: ' . $e->getMessage());
+        sendmessage($from_id, "Panel rename failed; no changes were committed.", $backadmin, 'HTML');
+        return;
+    }
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedNmaePanel']);
-    update("user", "Processing_value", $text, "id", $from_id);
-    update("marzban_panel", "name_panel", $text, "name_panel", $user['Processing_value']);
-    update("invoice", "Service_location", $text, "Service_location", $user['Processing_value']);
-    update("product", "Location", $text, "Location", $user['Processing_value']);
-    update("user", "Processing_value", $text, "id", $from_id);
     step('home', $from_id);
 } elseif ($text == "🔗 ویرایش آدرس پنل" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['geturlnew'], $backadmin, 'HTML');
@@ -4473,10 +4526,10 @@ $text_expie_agent
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Invalid-domain'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedurlPanel']);
-    update("marzban_panel", "url_panel", $text, "name_panel", $user['Processing_value']);
-    update("marzban_panel", "datelogin", null, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "url_panel", $text);
+    $panelService->updateSelectedField($user['Processing_value'], "datelogin", null);
     step('home', $from_id);
 } elseif ($text == "📍 تغییر گروه کاربری" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "📌 نوع کاربری را ارسال کنید
@@ -4484,9 +4537,9 @@ $text_expie_agent
 ❌ در صورتی که می خواهید پنل برای تمام گروه کاربری ها نمایش داده شود متن all را ارسال کنید", $backadmin, 'HTML');
     step('getagentpanel', $from_id);
 } elseif ($user['step'] == "getagentpanel") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], "📌گروه کاربری با موفقیت تغییر کرد");
-    update("marzban_panel", "agent", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "agent", $text);
     step('home', $from_id);
 } elseif ($text == "🔗 دامنه لینک ساب" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "📌 اگر پنل ثنایی هستید یک لینک ساب کاربر را از پنل کپی کرده سپس در این بخش ارسال کنید .بقیه پنل ها باید طبق ساختارش ارسال نمایید.", $backadmin, 'HTML');
@@ -4496,7 +4549,7 @@ $text_expie_agent
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Invalid-domain'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     if ($typepanel['type'] == "x-ui_single") {
         $req = new CurlRequest($text);
         $response = $req->get();
@@ -4520,23 +4573,23 @@ $text_expie_agent
         $text = dirname($text);
     }
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedurlPanel']);
-    update("marzban_panel", "linksubx", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "linksubx", $text);
     step('home', $from_id);
 } elseif ($text == "🔗 uuid admin" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "📌 uuid ادمین را ارسال کنید", $backadmin, 'HTML');
     step('getuuidadmin', $from_id);
 } elseif ($user['step'] == "getuuidadmin") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], "✅ uuid ادمین ذخیره گردید");
-    update("marzban_panel", "secret_code", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "secret_code", $text);
     step('home', $from_id);
 } elseif ($text == "🚨 محدودیت ساخت اکانت" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['setlimit'], $backadmin, 'HTML');
     step('getlimitnew', $from_id);
 } elseif ($user['step'] == "getlimitnew") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['changedlimit']);
-    update("marzban_panel", "limit_panel", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "limit_panel", $text);
     step('home', $from_id);
 } elseif ($text == "⏳ زمان سرویس تست" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "🕰 مدت زمان سرویس تست را ارسال کنید.
@@ -4547,9 +4600,9 @@ $text_expie_agent
         sendmessage($from_id, $textbotlang['Admin']['Product']['InvalidTime'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['saveddata']);
-    update("marzban_panel", "time_usertest", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "time_usertest", $text);
     step('home', $from_id);
 } elseif ($text == "💾 حجم اکانت تست" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "حجم سرویس تست را ارسال کنید.
@@ -4560,9 +4613,9 @@ $text_expie_agent
         sendmessage($from_id, $textbotlang['Admin']['Product']['Invalidvolume'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['saveddata']);
-    update("marzban_panel", "val_usertest", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "val_usertest", $text);
     step('home', $from_id);
 } elseif ($text == "💎 تنظیم شناسه اینباند" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "📌 شناسه اینباندی که می خواهید کانفیگ ازآن ساخته شود راارسال نمایید.  شناسه اینباند یک عدد چند رقمی است که در پنل  در صفحه اینباند ها ستون id  نوشته شده است
@@ -4571,46 +4624,83 @@ $text_expie_agent
     step('getinboundiid', $from_id);
 } elseif ($user['step'] == "getinboundiid") {
     sendmessage($from_id, "✅ شناسه اینباند با موفقیت ذخیره گردید", $optionX_ui_single, 'HTML');
-    update("marzban_panel", "inboundid", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "inboundid", $text);
     step('home', $from_id);
 } elseif ($text == "👤 ویرایش نام کاربری" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['getusernamenew'], $backadmin, 'HTML');
     step('GetusernameNew', $from_id);
 } elseif ($user['step'] == "GetusernameNew") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedusernamePanel']);
-    update("marzban_panel", "username_panel", $text, "name_panel", $user['Processing_value']);
-    update("marzban_panel", "datelogin", null, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "username_panel", $text);
+    $panelService->updateSelectedField($user['Processing_value'], "datelogin", null);
     step('home', $from_id);
 } elseif ($text == "⚙️ تنظیم پروتکل" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['Inbound']['GetProtocol'], $keyboardprotocol, 'HTML');
     step('getprotocolx_ui', $from_id);
 } elseif ($user['step'] == "getprotocolx_ui") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['setprotocol']);
-    $marzbanprotocol = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $marzbanprotocol = $panelService->resolveSelection($user['Processing_value']);
     update("x_ui", "protocol", $text, "codepanel", $marzbanprotocol['code_panel']);
     step('home', $from_id);
 } elseif ($text == "🔐 ویرایش رمز عبور" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['getpasswordnew'], $backadmin, 'HTML');
     step('GetpaawordNew', $from_id);
 } elseif ($user['step'] == "GetpaawordNew") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedpasswordPanel']);
-    update("marzban_panel", "password_panel", $text, "name_panel", $user['Processing_value']);
-    update("marzban_panel", "datelogin", null, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "password_panel", $text);
+    $panelService->updateSelectedField($user['Processing_value'], "datelogin", null);
     step('home', $from_id);
 } elseif ($text == "❌ حذف پنل" && $adminrulecheck['rule'] == "administrator") {
-    sendmessage($from_id, "در صورت تایید کلمه زیر را ارسال کنید.
-<code>تایید</code>", $backadmin, 'HTML');
-    step('confirmremovepanel', $from_id);
-} elseif ($user['step'] == "confirmremovepanel") {
-    if ($text == "تایید") {
-        sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], $keyboardadmin, 'HTML');
-        $marzban = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
-        $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE name_panel = :name_panel");
-        $stmt->bindParam(':name_panel', $user['Processing_value'], PDO::PARAM_STR);
-        $stmt->execute();
+    $selectedPanel = $panelService->resolveSelection($user['Processing_value']);
+    if (!$selectedPanel) {
+        sendmessage($from_id, "انتخاب پنل منقضی شده است؛ دوباره پنل را انتخاب کنید.", $keyboardadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $confirmPanelDelete = json_encode([
+        'inline_keyboard' => [
+            [[
+                'text' => 'تأیید حذف',
+                'callback_data' => panelCallbackData('confirm_delete', (int) $selectedPanel['id']),
+            ]],
+            [[
+                'text' => 'انصراف',
+                'callback_data' => panelCallbackData('select', (int) $selectedPanel['id']),
+            ]],
+        ],
+    ]);
+    sendmessage($from_id, "حذف پنل را تأیید کنید. فاکتورها و سوابق فروش حفظ می‌شوند.", $confirmPanelDelete, 'HTML');
+} elseif (
+    ($panelDeleteCallback = panelParseCallbackData($datain)) !== null
+    && $panelDeleteCallback['action'] === 'confirm_delete'
+    && $adminrulecheck['rule'] == "administrator"
+) {
+    $selectedPanelId = filter_var($user['Processing_value'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($selectedPanelId === false || (int) $selectedPanelId !== $panelDeleteCallback['panel_id']) {
+        telegram('answerCallbackQuery', [
+            'callback_query_id' => $callback_query_id,
+            'text' => 'این انتخاب پنل منقضی شده است.',
+            'show_alert' => true,
+        ]);
+        return;
+    }
+    try {
+        $deleteResult = $panelService->softDelete($panelDeleteCallback['panel_id']);
+        if ($deleteResult['status'] === 'deleted') {
+            sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], $keyboardadmin, 'HTML');
+        } else {
+            telegram('answerCallbackQuery', [
+                'callback_query_id' => $callback_query_id,
+                'text' => 'این پنل قبلاً حذف شده است.',
+                'show_alert' => true,
+            ]);
+        }
+    } catch (Throwable $e) {
+        error_log('panel delete handler failed: ' . $e->getMessage());
+        sendmessage($from_id, "حذف پنل ناموفق بود و هیچ تغییری ثبت نشد.", $keyboardadmin, 'HTML');
     }
     step('home', $from_id);
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managruser'] || $datain == "backlistuser") {
@@ -6918,8 +7008,8 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
         sendmessage($from_id, "❌ روش تمدید نامعتبر می باشد از لیست زیر روش تمدید درست را انتخاب کنید", null, 'HTML');
         return;
     }
-    update("marzban_panel", "Methodextend", $text, "name_panel", $user['Processing_value']);
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panelService->updateSelectedField($user['Processing_value'], "Methodextend", $text);
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], $textbotlang['Admin']['Algortimeextend']['SaveData']);
     step('home', $from_id);
 } elseif ($text == "♻️ تایید خودکار رسید" && $adminrulecheck['rule'] == "administrator") {
@@ -7424,7 +7514,7 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
 } elseif ($user['step'] == "getInbounddisable") {
     sendmessage($from_id, "نام اینباند با موفقیت ذخیره گردید", $optionMarzban, 'HTML');
     $textpro = "{$user['Processing_value_one']}*$text";
-    update("marzban_panel", "inbound_deactive", $textpro, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "inbound_deactive", $textpro);
     step("home", $from_id);
 } elseif ($text == "🗑 بهینه سازی ربات" && $adminrulecheck['rule'] == "administrator") {
     $textoptimize = "❌❌❌❌❌❌❌ متن زیر را با دقت بخوانید
@@ -8341,7 +8431,7 @@ n2", $backadmin, 'HTML');
     $stmt->execute();
     update("user", "Processing_value", $panel['name_panel'], "id", $from_id);
 } elseif ($text == "❌ حذف کانفیگ") {
-    $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panel = $panelService->resolveSelection($user['Processing_value']);
     $listconfig = [];
     $stmt = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = '{$panel['code_panel']}'");
     $stmt->execute();
@@ -8373,9 +8463,9 @@ n2", $backadmin, 'HTML');
     sendmessage($from_id, "📌 قیمت تغییر لوکیشن از سایر پنل‌ها به این پنل را ارسال کنید", $backadmin, 'HTML');
     step('setpricechangelocation', $from_id);
 } elseif ($user['step'] == "setpricechangelocation") {
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], "📌قیمت تغییر لوکیشن با موفقیت تغییر کرد");
-    update("marzban_panel", "priceChangeloc", $text, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "priceChangeloc", $text);
     step('home', $from_id);
 } elseif ($text == "➕ قیمت حجم اضافه" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "📌 قیمت حجم اضافه برای این پنل را ارسال نمایید.", $backadmin, 'HTML');
@@ -8542,7 +8632,7 @@ n2", $backadmin, 'HTML');
     ]);
     Editmessagetext($from_id, $message_id, "روشن شد", $keyboardverify);
 } elseif ($text == "✏️ ویرایش کانفیگ") {
-    $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panel = $panelService->resolveSelection($user['Processing_value']);
     $listconfig = [];
     $stmt = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = '{$panel['code_panel']}'");
     $stmt->execute();
@@ -9006,7 +9096,7 @@ f,n.n2", $backadmin, 'HTML');
         sendmessage($from_id, "کاربر در پنل وجود ندارد", null, 'HTML');
         return;
     }
-    update("marzban_panel", "proxies", json_encode($userdata['service_ids']), "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "proxies", json_encode($userdata['service_ids']));
     step("home", $from_id);
     sendmessage($from_id, "✅ اطلاعات با موفقیت تنظیم گردید", $optionmarzneshin, 'HTML');
 } elseif ($text == "👤 تنظیم آیدی پشتیبانی" && $adminrulecheck['rule'] == "administrator") {
@@ -9480,7 +9570,7 @@ f,n.n2", $backadmin, 'HTML');
     sendmessage($from_id, $textsetprotocol, $backadmin, 'HTML');
     step("setinboundandprotocol", $from_id);
 } elseif ($user['step'] == "setinboundandprotocol") {
-    $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panel = $panelService->resolveSelection($user['Processing_value']);
     if ($panel['type'] == "marzban") {
         if ($panel['version_panel'] == "1") {
             $DataUserOut = getuser($text, $user['Processing_value']);
@@ -9509,8 +9599,8 @@ f,n.n2", $backadmin, 'HTML');
                     $DataUserOut['proxy_settings'][$key] = new stdClass();
                 }
             }
-            update("marzban_panel", "inbounds", json_encode($DataUserOut['group_ids']), "name_panel", $user['Processing_value']);
-            update("marzban_panel", "proxies", json_encode($DataUserOut['proxy_settings'], true), "name_panel", $user['Processing_value']);
+        $panelService->updateSelectedField($user['Processing_value'], "inbounds", json_encode($DataUserOut['group_ids']));
+        $panelService->updateSelectedField($user['Processing_value'], "proxies", json_encode($DataUserOut['proxy_settings'], true));
         } else {
             $DataUserOut = getuser($text, $user['Processing_value']);
             if (!empty($DataUserOut['error'])) {
@@ -9548,10 +9638,10 @@ f,n.n2", $backadmin, 'HTML');
                 $inbounds_to_store = array(
                     $service_protocol => array("setservice-" . intval($DataUserOut['service_id']))
                 );
-                update("marzban_panel", "version_panel", "2", "name_panel", $user['Processing_value']);
+        $panelService->updateSelectedField($user['Processing_value'], "version_panel", "2");
             }
-            update("marzban_panel", "inbounds", json_encode($inbounds_to_store), "name_panel", $user['Processing_value']);
-            update("marzban_panel", "proxies", json_encode($DataUserOut['proxies'], true), "name_panel", $user['Processing_value']);
+        $panelService->updateSelectedField($user['Processing_value'], "inbounds", json_encode($inbounds_to_store));
+        $panelService->updateSelectedField($user['Processing_value'], "proxies", json_encode($DataUserOut['proxies'], true));
         }
     } elseif ($panel['type'] == "s_ui") {
         $data = GetClientsS_UI($text, $panel['name_panel']); {
@@ -9563,10 +9653,10 @@ f,n.n2", $backadmin, 'HTML');
             foreach ($data['inbounds'] as $service) {
                 $servies[] = $service;
             }
-            update("marzban_panel", "proxies", json_encode($servies, true), "name_panel", $user['Processing_value']);
+        $panelService->updateSelectedField($user['Processing_value'], "proxies", json_encode($servies, true));
         }
     } elseif ($panel['type'] == "ibsng" || $panel['type'] == "mikrotik") {
-        update("marzban_panel", "proxies", $text, "name_panel", $user['Processing_value']);
+        $panelService->updateSelectedField($user['Processing_value'], "proxies", $text);
     }
     if ($panel['type'] == "ibsng") {
         sendmessage($from_id, "✅ نام گروه با موفقیت تنظیم گردید.", $optionibsng, 'HTML');
@@ -9577,7 +9667,7 @@ f,n.n2", $backadmin, 'HTML');
     }
     step("home", $from_id);
 } elseif ($text == "🔋 وضعیت تمدید" && $adminrulecheck['rule'] == "administrator") {
-    $marzbanstatus = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $marzbanstatus = $panelService->resolveSelection($user['Processing_value']);
     $keyboardstatus = json_encode([
         'inline_keyboard' => [
             [
@@ -9587,8 +9677,8 @@ f,n.n2", $backadmin, 'HTML');
     ]);
     sendmessage($from_id, $textbotlang['Admin']['Status']['activepanel'], $keyboardstatus, 'HTML');
 } elseif ($datain == "on_extend") {
-    update("marzban_panel", "status_extend", "off_extend", "name_panel", $user['Processing_value']);
-    $marzbanstatus = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panelService->updateSelectedField($user['Processing_value'], "status_extend", "off_extend");
+    $marzbanstatus = $panelService->resolveSelection($user['Processing_value']);
     $keyboardstatus = json_encode([
         'inline_keyboard' => [
             [
@@ -9598,8 +9688,8 @@ f,n.n2", $backadmin, 'HTML');
     ]);
     Editmessagetext($from_id, $message_id, $textbotlang['Admin']['Status']['activepanelStatusOff'], $keyboardstatus);
 } elseif ($datain == "off_extend") {
-    update("marzban_panel", "status_extend", "on_extend", "name_panel", $user['Processing_value']);
-    $marzbanstatus = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panelService->updateSelectedField($user['Processing_value'], "status_extend", "on_extend");
+    $marzbanstatus = $panelService->resolveSelection($user['Processing_value']);
     $keyboardstatus = json_encode([
         'inline_keyboard' => [
             [
@@ -9665,7 +9755,7 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
         sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     outtypepanel($typepanel['type'], "✅ پنل با موفقیت برای کاربر مخفی گردید");
     if ($typepanel['hide_user'] == null) {
         $hideuserid = [];
@@ -9674,7 +9764,7 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
     }
     $hideuserid[] = $text;
     $hideuserid = json_encode($hideuserid);
-    update("marzban_panel", "hide_user", $hideuserid, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "hide_user", $hideuserid);
     step('home', $from_id);
 } elseif ($text == "❌  حذف کاربر از لیست مخفی شدگان" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "📌آیدی عددی کاربر را برای این پنل را ارسال نمایید.", $backadmin, 'HTML');
@@ -9684,7 +9774,7 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
         sendmessage($from_id, $textbotlang['Admin']['agent']['invalidvlue'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $typepanel = $panelService->resolveSelection($user['Processing_value']);
     step("home", $from_id);
     if ($typepanel['hide_user'] == null) {
         outtypepanel($typepanel['type'], "❌ هیچ کاربری در لیست مخفی شدگان وجود ندارد");
@@ -9705,7 +9795,7 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
         $hideuserid = array_values($hideuserid);
     }
     $hideuserid = json_encode($hideuserid);
-    update("marzban_panel", "hide_user", $hideuserid, "name_panel", $user['Processing_value']);
+    $panelService->updateSelectedField($user['Processing_value'], "hide_user", $hideuserid);
     outtypepanel($typepanel['type'], "✅  کاربر با موفقیت از لیست حذف گردید.");
 } elseif ($datain == "scoresetting") {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $lottery, 'HTML');
@@ -10585,7 +10675,7 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $stmt->bindParam(':name', $text, PDO::PARAM_STR);
     $stmt->execute();
 } elseif ($text == "⚙️ وضعیت قابلیت ها پنل" && $adminrulecheck['rule'] == "administrator") {
-    $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
+    $panel = $panelService->resolveSelection($user['Processing_value']);
     if (!in_array($panel['subvip'], ['offsubvip', 'onsubvip'])) {
         update("marzban_panel", "subvip", "offsubvip", "code_panel", $panel['code_panel']);
         $panel = select("marzban_panel", "*", "code_panel", $panel['code_panel'], "select");

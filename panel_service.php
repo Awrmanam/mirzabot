@@ -177,6 +177,27 @@ class PanelService
         return $panel ?: null;
     }
 
+    public function resolveSelection($selection): ?array
+    {
+        $selection = (string) $selection;
+        if (ctype_digit($selection) && (int) $selection > 0) {
+            return $this->findActive((int) $selection);
+        }
+
+        // Temporary read compatibility for sessions created before this
+        // release. New sessions always store the canonical numeric id.
+        $deletedFilter = panelIdentitySchemaReady($this->pdo) ? ' AND deleted_at IS NULL' : '';
+        $stmt = $this->pdo->prepare(
+            "SELECT * FROM marzban_panel
+             WHERE (name_panel = :selection_name OR code_panel = :selection_code){$deletedFilter}
+             ORDER BY id LIMIT 2"
+        );
+        $stmt->execute([':selection_name' => $selection, ':selection_code' => $selection]);
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return count($matches) === 1 ? $matches[0] : null;
+    }
+
     public function normalizedNameExists(string $rawName, ?int $exceptPanelId = null): bool
     {
         $normalizedName = panelNormalizeName($rawName);
@@ -300,6 +321,12 @@ class PanelService
             'url_panel', 'username_panel', 'password_panel', 'agent', 'linksubx',
             'secret_code', 'limit_panel', 'time_usertest', 'val_usertest',
             'inboundid', 'MethodUsername', 'Methodextend', 'datelogin',
+            'changeloc', 'conecton', 'config', 'customvolume', 'hide_user',
+            'inbound_deactive', 'inbounds', 'inboundstatus', 'maintime',
+            'mainvolume', 'maxtime', 'maxvolume', 'namecustom', 'on_hold_test',
+            'priceChangeloc', 'pricecustomtime', 'pricecustomvolume',
+            'priceextratime', 'priceextravolume', 'proxies', 'status',
+            'status_extend', 'sublink', 'subvip', 'TestAccount', 'version_panel',
         ];
         if (!in_array($field, $allowed, true)) {
             throw new InvalidArgumentException('Unsupported panel field');
@@ -312,6 +339,15 @@ class PanelService
             "UPDATE marzban_panel SET `{$field}` = :value WHERE id = :panel_id AND deleted_at IS NULL"
         );
         $stmt->execute([':value' => $value, ':panel_id' => $panelId]);
+    }
+
+    public function updateSelectedField($selection, string $field, $value): void
+    {
+        $panel = $this->resolveSelection($selection);
+        if (!$panel) {
+            throw new PanelNotFoundException('Panel selection is missing or ambiguous');
+        }
+        $this->updateField((int) $panel['id'], $field, $value);
     }
 
     public function softDelete(int $panelId): array

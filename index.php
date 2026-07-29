@@ -9,6 +9,7 @@ require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';
 require_once 'ticket_system.php';
+require_once 'panel_service.php';
 require_once 'keyboard.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';

@@ -291,6 +291,7 @@ $chat_member = $update['chat_member'] ?? null;
 $language_code = strtolower($update['message']['from']['language_code'] ?? $update['callback_query']['from']['language_code'] ?? "fa");
 $Chat_type = $update["message"]["chat"]["type"] ?? $update['callback_query']['message']['chat']['type'] ?? '';
 $text = $update["message"]["text"]  ?? '';
+$message_entities = $update["message"]["entities"] ?? [];
 if(isset($update['pre_checkout_query'])){
     $Chat_type = "private";
     $from_id = $update['pre_checkout_query']['from']['id'];
