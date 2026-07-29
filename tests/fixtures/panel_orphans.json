@@ -1,0 +1,19 @@
+{
+  "panels": [
+    {"id": 1, "name": "healthy"},
+    {"id": 4, "name": "soft-deleted-but-preserved"}
+  ],
+  "relations": {
+    "invoice": [
+      {"id": "inv-healthy", "panel_id": 1},
+      {"id": "inv-orphan", "panel_id": 99}
+    ],
+    "manualsell": [
+      {"id": 1, "panel_id": 4}
+    ],
+    "product": [
+      {"id": 1, "panel_id": 1},
+      {"id": 2, "panel_id": 99}
+    ]
+  }
+}
