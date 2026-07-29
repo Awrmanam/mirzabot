@@ -281,7 +281,7 @@ self_update_script "$@"
 # ── Repo / paths ─────────────────────────────────────────────
 BOT_DIR_DEFAULT="/var/www/html/mirzaprobotconfig"
 CONFIG_FILE_DEFAULT="$BOT_DIR_DEFAULT/config.php"
-GIT_REPO="mahdiMGF2/mirzabot"
+GIT_REPO="Awrmanam/mirzabot" CUSTOM_BRANCH="rebecca-support-perf-final-20260729-022706" CUSTOM_ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support-perf-final-20260729-022706.zip"
 LATEST_CACHE="/tmp/.mirza_latest_version"
 IP_CACHE="/tmp/.mirza_server_ip"
 
