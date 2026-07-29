@@ -78,9 +78,31 @@ $check(
     strpos($update, 'Proceeding without backup') === false,
     'update does not continue without config.php'
 );
+$rollbackStart = strpos($update, 'rollback_update_cutover() {');
+$rollbackEnd = $rollbackStart === false
+    ? false
+    : strpos($update, 'trap rollback_update_cutover EXIT', $rollbackStart);
+$updateRollback = $rollbackStart !== false && $rollbackEnd !== false
+    ? substr($update, $rollbackStart, $rollbackEnd - $rollbackStart)
+    : '';
+$normalUpdate = $rollbackStart !== false && $rollbackEnd !== false
+    ? substr($update, 0, $rollbackStart) . substr($update, $rollbackEnd)
+    : $update;
+$rollbackGuard = strpos($updateRollback, 'if [ "$CUTOVER_ACTIVE" -eq 1 ]; then');
+$rollbackDelete = strpos($updateRollback, 'sudo rm -rf "$BOT_DIR"');
+$normalCutover = strpos($normalUpdate, 'sudo mv "$BOT_DIR" "$BACKUP_DIR"');
+$normalActivation = strpos($normalUpdate, 'CUTOVER_ACTIVE=1');
+$normalPreCutover = $normalActivation === false ? $normalUpdate : substr($normalUpdate, 0, $normalActivation);
 $check(
-    strpos($update, 'sudo rm -rf "$BOT_DIR"') > $updateCutover,
-    'update never deletes the live directory before creating its rollback copy'
+    $rollbackGuard !== false && $rollbackDelete !== false && $rollbackGuard < $rollbackDelete,
+    'update deletes BOT_DIR only inside the active rollback handler'
+);
+$check(
+    $normalCutover !== false
+        && $normalActivation !== false
+        && $normalCutover < $normalActivation
+        && strpos($normalPreCutover, 'sudo rm -rf "$BOT_DIR"') === false,
+    'update backs up live BOT_DIR before activating rollback without unconditional pre-cutover deletion'
 );
 $updateBackupDelete = strpos($update, 'sudo rm -rf "$BACKUP_DIR"');
 $updateInstallerCopy = strpos($update, 'sudo cp "$BOT_DIR/install.sh" /root/install.sh');
