@@ -95,12 +95,26 @@ function logApiRequest($headers, $data, $action)
     global $pdo;
 
     try {
+        $redact = function ($value, $key = '') use (&$redact) {
+            $sensitiveKeys = ['token', 'authorization', 'password', 'secret', 'api_key', 'apikey'];
+            if (in_array(strtolower((string) $key), $sensitiveKeys, true)) {
+                return '[REDACTED]';
+            }
+            if (is_array($value)) {
+                $result = [];
+                foreach ($value as $childKey => $childValue) {
+                    $result[$childKey] = $redact($childValue, $childKey);
+                }
+                return $result;
+            }
+            return $value;
+        };
         $stmt = $pdo->prepare(
             "INSERT IGNORE INTO logs_api (header, data, time, ip, actions) VALUES (?, ?, ?, ?, ?)"
         );
         $stmt->execute([
-            json_encode($headers),
-            json_encode($data),
+            json_encode($redact($headers)),
+            json_encode($redact($data)),
             date('Y/m/d H:i:s'),
             $_SERVER['REMOTE_ADDR'] ?? 'unknown',
             $action

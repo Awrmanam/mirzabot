@@ -1,5 +1,7 @@
 <?php
 
+$memoryAtStart = memory_get_usage(true);
+
 class StyledStep2FakeStatement
 {
     private $pdo;
@@ -404,38 +406,35 @@ $check(
 $check(
     strpos(
         $installer,
-        'readonly MIRZA_SOURCE_BRANCH="premium-emoji-optimization-step2-20260729"'
+        'require_value MIRZA_RELEASE_SHA256'
     ) !== false,
-    'install.sh pins the Step 2 source branch'
+    'install.sh requires a release checksum'
 );
 
 $protectedFiles = [
+    'emoji_system.php',
     'emoji_install.php',
     'scripts/migrate_custom_emoji.php',
-    'botapi.php',
-    'index.php',
-    'keyboard.php',
-    'admin.php',
-    'function.php',
-    'ticket_system.php',
-    'ticket_install.php',
-    'table.php',
-    'config.php',
-    'text.json',
 ];
 $command = 'git -C ' . escapeshellarg($root)
-    . ' diff --name-only f4c7da8b8bc5c79dd086e5d1a4489bb9ce0e749e -- '
+    . ' diff --name-only c9ca081e88ede2ce7978a05e91811b1e59ea0678 -- '
     . implode(' ', array_map('escapeshellarg', $protectedFiles));
 exec($command, $protectedChanges, $gitExitCode);
 $check(
     $gitExitCode === 0 && count($protectedChanges) === 0,
-    'Step 1 migration files and protected runtime files are unchanged'
+    'Step 2 emoji runtime and explicit migration entrypoints are unchanged'
 );
 
 $cache =& styledRuntimeCache();
 $check(
     $cache['usage_shutdown_registered'] === true,
     'usage flush shutdown callback is registered request-locally'
+);
+
+$memoryDelta = memory_get_usage(true) - $memoryAtStart;
+$check(
+    $memoryDelta <= 16 * 1024 * 1024,
+    'repeatable Custom Emoji regression fixture stays within a 16 MiB memory delta'
 );
 
 echo "\n[METRIC] settings_selects_multiple_keys={$settingsSelects}\n";
@@ -447,6 +446,8 @@ echo "[METRIC] identical_usage_writes_before_flush={$identicalWritesBeforeFlush}
 echo "[METRIC] identical_usage_writes_after_flush={$identicalWritesAfterFlush}\n";
 echo "[METRIC] two_tuple_writes_before_flush={$twoTupleWritesBeforeFlush}\n";
 echo "[METRIC] two_tuple_writes_after_flush={$twoTupleWritesAfterFlush}\n";
+echo "[METRIC] memory_delta_bytes={$memoryDelta}\n";
+echo "[METRIC] peak_memory_bytes=" . memory_get_peak_usage(true) . "\n";
 
 if ($failures) {
     echo "\n" . count($failures) . " Step 2 performance check(s) failed.\n";

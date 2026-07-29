@@ -24,6 +24,7 @@ $read = function ($relativePath) use ($root) {
 $emojiSystem = $read('emoji_system.php');
 $emojiInstall = $read('emoji_install.php');
 $installer = $read('install.sh');
+$installerCommon = $read('scripts/installer/common.sh');
 
 $check(strpos($emojiSystem, 'emoji_install.php') === false, 'emoji_system.php does not include emoji_install.php');
 $check(
@@ -32,38 +33,26 @@ $check(
     'emoji_install.php requires explicit migration authorization'
 );
 
-$migrationCommand = 'php "$BOT_DIR/scripts/migrate_custom_emoji.php"';
-$installStart = strpos($installer, 'function install_bot()');
-$updateStart = strpos($installer, 'function update_bot()');
-$removeStart = strpos($installer, 'function remove_bot()');
-$freshInstallSection = substr($installer, $installStart, $updateStart - $installStart);
-$updateSection = substr($installer, $updateStart, $removeStart - $updateStart);
 $check(
-    substr_count($freshInstallSection, $migrationCommand) === 1,
-    'fresh install invokes the migration CLI once'
+    substr_count($installerCommon, 'php "$MIRZA_PREPARED_RELEASE/scripts/migrate_custom_emoji.php"') === 1,
+    'central migration state invokes the Custom Emoji migration once'
 );
 $check(
-    substr_count($updateSection, $migrationCommand) === 1,
-    'update invokes the migration CLI once'
+    strpos($installer, 'run_migrations') !== false,
+    'fresh install invokes the central migration state'
 );
-$check(substr_count($installer, $migrationCommand) === 2, 'migration CLI is invoked only by fresh install and update');
-
-$branch = 'premium-emoji-optimization-step1-20260729';
 $check(
-    strpos($installer, 'readonly MIRZA_SOURCE_BRANCH="' . $branch . '"') !== false,
-    'install.sh pins the source branch'
+    strpos($installerCommon, 'MIRZA_RELEASE_SHA256 is required') !== false,
+    'installer requires an immutable release checksum'
 );
 
 $sourceLines = preg_grep(
-    '~(?:raw\.githubusercontent\.com/Awrmanam/mirzabot|github\.com/Awrmanam/mirzabot/archive/refs/heads/)~',
-    preg_split('/\R/', $installer)
+    '~github\.com/\$\{MIRZA_REPOSITORY\}/archive/\$\{MIRZA_RELEASE_REF\}\.zip~',
+    preg_split('/\R/', $installerCommon)
 );
 $check(
-    count($sourceLines) >= 3
-        && count(array_filter($sourceLines, function ($line) {
-            return strpos($line, '${MIRZA_SOURCE_BRANCH}') === false;
-        })) === 0,
-    'all installer source URLs use the pinned branch variable'
+    count($sourceLines) === 1,
+    'installer has one release-ref archive source'
 );
 
 $forbiddenSources = [
@@ -72,13 +61,13 @@ $forbiddenSources = [
     'mahdiMGF2',
 ];
 foreach ($forbiddenSources as $forbiddenSource) {
-    $check(strpos($installer, $forbiddenSource) === false, "install.sh excludes {$forbiddenSource} source references");
+    $check(strpos($installer . $installerCommon, $forbiddenSource) === false, "installer excludes {$forbiddenSource} source references");
 }
 
 $check(
-    strpos($installer, 'cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/') !== false
-        && strpos($installer, 'mv "$EXTRACTED_DIR"/*') === false,
-    'install.sh uses complete-directory copy and no wildcard-only move'
+    strpos($installerCommon, 'cp -a "$source_dir"/. "$MIRZA_PREPARED_RELEASE"/') !== false
+        && strpos($installerCommon, 'mv "$EXTRACTED_DIR"/*') === false,
+    'installer stages a complete directory without wildcard-only moves'
 );
 $check(
     !preg_match('/marker|\.ready|\.installed|file_exists|is_file/i', $emojiSystem),
