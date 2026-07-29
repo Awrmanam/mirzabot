@@ -4,6 +4,8 @@ date_default_timezone_set('Asia/Tehran');
 ini_set('default_charset', 'UTF-8');
 ini_set('error_log', 'error_log');
 require_once 'config.php';
+require_once __DIR__ . '/emoji_system.php';
+
 if (ini_set('memory_limit', MIRZA_MEMORY_LIMIT) === false) {
     error_log('[Mirza Runtime] Unable to apply MIRZA_MEMORY_LIMIT.');
 }
