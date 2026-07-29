@@ -2028,26 +2028,87 @@ EOF
             secrettoken=$(openssl rand -base64 10 | tr -dc 'a-zA-Z0-9' | cut -c1-8)
             state_set SECRET "$secrettoken"
         fi
-        cat <<EOF > /var/www/html/mirzaprobotconfig/config.php
+cat <<EOF > /var/www/html/mirzaprobotconfig/config.php
 <?php
-// This variable added for high load panels which their response time is long and bot can't communicate with online panel!
-// null for default settings
+
 \$request_exec_timeout = null;
+
 \$dbhost = 'localhost';
 \$dbname = '$dbname';
 \$usernamedb = '$dbuser';
 \$passworddb = '$dbpass';
+
 \$connect = mysqli_connect(\$dbhost, \$usernamedb, \$passworddb, \$dbname);
-if (\$connect->connect_error) { die("error" . \$connect->connect_error); }
-mysqli_set_charset(\$connect, "utf8mb4");
-\$options = [ PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false, ];
-\$dsn = "mysql:host=\$dbhost;dbname=\$dbname;charset=utf8mb4";
-try { \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options); } catch (\PDOException \$e) { error_log("Database connection failed: " . \$e->getMessage()); }
+
+if (\$connect === false) {
+    die('Database connection error: ' . mysqli_connect_error());
+}
+
+mysqli_set_charset(\$connect, 'utf8mb4');
+
+\$options = [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES => false,
+];
+
+\$dsn = "mysql:host={\$dbhost};dbname={\$dbname};charset=utf8mb4";
+
+try {
+    \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options);
+} catch (PDOException \$e) {
+    error_log('Database connection failed: ' . \$e->getMessage());
+}
+
 \$APIKEY = '${YOUR_BOT_TOKEN}';
 \$adminnumber = '${YOUR_CHAT_ID}';
 \$domainhosts = '${YOUR_DOMAIN}';
 \$usernamebot = '${YOUR_BOTNAME}';
-?>
+
+\$customEmojiFlag = getenv('CUSTOM_EMOJI_ENABLED');
+
+if (!defined('CUSTOM_EMOJI_ENABLED')) {
+    define(
+        'CUSTOM_EMOJI_ENABLED',
+        \$customEmojiFlag !== false
+            ? filter_var(\$customEmojiFlag, FILTER_VALIDATE_BOOLEAN)
+            : true
+    );
+}
+
+\$customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
+
+if (!defined('CUSTOM_EMOJI_USAGE_TRACKING')) {
+    define(
+        'CUSTOM_EMOJI_USAGE_TRACKING',
+        \$customEmojiUsageFlag !== false
+            ? filter_var(\$customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN)
+            : false
+    );
+}
+
+\$appDebugFlag = getenv('APP_DEBUG');
+
+if (!defined('APP_DEBUG')) {
+    define(
+        'APP_DEBUG',
+        \$appDebugFlag !== false
+            ? filter_var(\$appDebugFlag, FILTER_VALIDATE_BOOLEAN)
+            : false
+    );
+}
+
+\$configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
+
+if (!preg_match('/^[1-9][0-9]*[KMG]$/i', \$configuredMemoryLimit)) {
+    \$configuredMemoryLimit = '256M';
+}
+
+if (!defined('MIRZA_MEMORY_LIMIT')) {
+    define('MIRZA_MEMORY_LIMIT', strtoupper(\$configuredMemoryLimit));
+}
+
+ini_set('memory_limit', MIRZA_MEMORY_LIMIT);
 EOF
         sudo chown www-data:www-data /var/www/html/mirzaprobotconfig/config.php 2>/dev/null
         mark_phase CONFIG
