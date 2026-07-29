@@ -97,17 +97,31 @@ validate_release_input() {
 
 install_packages() {
     export DEBIAN_FRONTEND=noninteractive
+    local database_packages=()
+    if ! command -v mysql >/dev/null 2>&1; then
+        database_packages=(default-mysql-server)
+    fi
     apt-get update
     apt-get install -y --no-install-recommends \
         apache2 certbot curl ca-certificates unzip openssl dnsutils \
-        mysql-server \
         php libapache2-mod-php php-cli php-mysql php-curl php-mbstring \
-        php-xml php-zip php-intl
+        php-xml php-zip php-intl "${database_packages[@]}"
 
     a2dismod mpm_event >/dev/null 2>&1 || true
     a2enmod mpm_prefork rewrite ssl headers >/dev/null
-    systemctl enable --now apache2 mysql
+    systemctl enable --now apache2
+    if systemctl list-unit-files mysql.service >/dev/null 2>&1; then
+        systemctl enable --now mysql
+    elif systemctl list-unit-files mariadb.service >/dev/null 2>&1; then
+        systemctl enable --now mariadb
+    else
+        die "neither MySQL nor MariaDB systemd service is available"
+    fi
 
+    verify_php_runtime
+}
+
+verify_php_runtime() {
     local php_version
     php_version="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
     [[ "$php_version" == "$MIRZA_EXPECTED_PHP" ]] \
@@ -128,6 +142,92 @@ ensure_directories() {
     install -d -m 0750 -o root -g www-data "$MIRZA_ROOT" "$MIRZA_RELEASES_DIR" "$MIRZA_SHARED_DIR"
     install -d -m 0750 -o www-data -g www-data "$MIRZA_SHARED_DIR/acme"
     install -d -m 0700 -o root -g root "$MIRZA_SHARED_DIR/backups"
+    install -d -m 0770 -o www-data -g www-data "$MIRZA_SHARED_DIR/runtime" "$MIRZA_SHARED_DIR/storage"
+}
+
+link_shared_runtime() {
+    local release="$1"
+    local runtime="$MIRZA_SHARED_DIR/runtime"
+    local mutable_file
+    for mutable_file in error_log log.txt users.json cookie.txt ss custom.jpg; do
+        touch "$runtime/$mutable_file"
+        chown www-data:www-data "$runtime/$mutable_file"
+        chmod 0660 "$runtime/$mutable_file"
+        rm -f -- "$release/$mutable_file"
+        ln -s "$runtime/$mutable_file" "$release/$mutable_file"
+    done
+
+    local seeded_file
+    for seeded_file in images.jpg text.json; do
+        if [[ ! -s "$runtime/$seeded_file" && -f "$release/$seeded_file" ]]; then
+            cp -- "$release/$seeded_file" "$runtime/$seeded_file"
+        fi
+        touch "$runtime/$seeded_file"
+        chown www-data:www-data "$runtime/$seeded_file"
+        chmod 0660 "$runtime/$seeded_file"
+        rm -f -- "$release/$seeded_file"
+        ln -s "$runtime/$seeded_file" "$release/$seeded_file"
+    done
+    touch "$runtime/api-hash.txt"
+    chown www-data:www-data "$runtime/api-hash.txt"
+    chmod 0660 "$runtime/api-hash.txt"
+    rm -f -- "$release/api/hash.txt"
+    ln -s "$runtime/api-hash.txt" "$release/api/hash.txt"
+
+    local cron_state
+    for cron_state in users.json info gift username.json; do
+        touch "$runtime/cron-${cron_state}"
+        chown www-data:www-data "$runtime/cron-${cron_state}"
+        chmod 0660 "$runtime/cron-${cron_state}"
+        rm -f -- "$release/cronbot/$cron_state"
+        ln -s "$runtime/cron-${cron_state}" "$release/cronbot/$cron_state"
+    done
+
+    rm -rf -- "$release/storage"
+    ln -s "$MIRZA_SHARED_DIR/storage" "$release/storage"
+
+    if [[ ! -d "$MIRZA_SHARED_DIR/vpnbot" ]]; then
+        cp -a "$release/vpnbot" "$MIRZA_SHARED_DIR/vpnbot"
+    else
+        install -d -m 0770 -o www-data -g www-data \
+            "$MIRZA_SHARED_DIR/vpnbot/Default" "$MIRZA_SHARED_DIR/vpnbot/update"
+        cp -a "$release/vpnbot/Default"/. "$MIRZA_SHARED_DIR/vpnbot/Default"/
+        cp -a "$release/vpnbot/update"/. "$MIRZA_SHARED_DIR/vpnbot/update"/
+    fi
+    chown -R www-data:www-data "$MIRZA_SHARED_DIR/vpnbot"
+    find "$MIRZA_SHARED_DIR/vpnbot" -type d -exec chmod 0770 {} +
+    find "$MIRZA_SHARED_DIR/vpnbot" -type f -exec chmod 0660 {} +
+    rm -rf -- "$release/vpnbot"
+    ln -s "$MIRZA_SHARED_DIR/vpnbot" "$release/vpnbot"
+}
+
+migrate_legacy_persistent_data() {
+    [[ -d "$MIRZA_LEGACY_PATH" && ! -L "$MIRZA_LEGACY_PATH" ]] || return
+    local runtime="$MIRZA_SHARED_DIR/runtime"
+
+    if [[ -d "$MIRZA_LEGACY_PATH/vpnbot" && ! -d "$MIRZA_SHARED_DIR/vpnbot" ]]; then
+        cp -a "$MIRZA_LEGACY_PATH/vpnbot" "$MIRZA_SHARED_DIR/vpnbot"
+    fi
+    if [[ -d "$MIRZA_LEGACY_PATH/storage" ]]; then
+        cp -a "$MIRZA_LEGACY_PATH/storage"/. "$MIRZA_SHARED_DIR/storage"/
+    fi
+
+    local source relative target
+    for relative in error_log log.txt users.json cookie.txt ss custom.jpg images.jpg text.json api/hash.txt \
+        cronbot/users.json cronbot/info cronbot/gift cronbot/username.json; do
+        source="$MIRZA_LEGACY_PATH/$relative"
+        [[ -s "$source" ]] || continue
+        case "$relative" in
+            api/hash.txt) target="$runtime/api-hash.txt" ;;
+            cronbot/*) target="$runtime/cron-${relative#cronbot/}" ;;
+            *) target="$runtime/${relative##*/}" ;;
+        esac
+        if [[ ! -s "$target" ]]; then
+            cp -- "$source" "$target"
+        fi
+    done
+    chown -R www-data:www-data "$MIRZA_SHARED_DIR/runtime" "$MIRZA_SHARED_DIR/storage"
+    log INFO "legacy persistent files copied to shared storage"
 }
 
 ensure_database() {
@@ -253,6 +353,7 @@ prepare_release() {
     mkdir "$MIRZA_PREPARED_RELEASE"
     cp -a "$source_dir"/. "$MIRZA_PREPARED_RELEASE"/
     ln -s ../../shared/config.php "$MIRZA_PREPARED_RELEASE/config.php"
+    link_shared_runtime "$MIRZA_PREPARED_RELEASE"
     chown -R root:www-data "$MIRZA_PREPARED_RELEASE"
     find "$MIRZA_PREPARED_RELEASE" -type d -exec chmod 0750 {} +
     find "$MIRZA_PREPARED_RELEASE" -type f -exec chmod 0640 {} +
@@ -292,13 +393,16 @@ backup_database() {
     MYSQL_PWD="$password" mysqldump --single-transaction --quick --routines --triggers \
         --host="$host" --user="$user" "$database" >"$DATABASE_BACKUP"
     [[ -s "$DATABASE_BACKUP" ]] || die "database dump is empty"
-    head -n 20 "$DATABASE_BACKUP" | grep -qi 'MySQL dump' || die "database dump validation failed"
+    head -n 20 "$DATABASE_BACKUP" | grep -Eqi '(MySQL|MariaDB) dump' || die "database dump validation failed"
     log INFO "validated pre-update database backup created"
 }
 
 run_migrations() {
     [[ -n "${MIRZA_PREPARED_RELEASE:-}" ]] || die "release is not prepared"
-    php "$MIRZA_PREPARED_RELEASE/table.php"
+    (
+        cd "$MIRZA_PREPARED_RELEASE"
+        php table.php
+    )
     php "$MIRZA_PREPARED_RELEASE/scripts/migrate_custom_emoji.php"
     local migration_args=(--backup-dir="$MIRZA_SHARED_DIR/backups")
     if [[ "${MIRZA_FRESH_DATABASE:-no}" == "yes" ]]; then
@@ -306,6 +410,13 @@ run_migrations() {
     fi
     php "$MIRZA_PREPARED_RELEASE/scripts/migrate_panel_identity.php" "${migration_args[@]}"
     log INFO "forward-only migrations completed"
+}
+
+pre_activate_health_check() {
+    [[ -d "${MIRZA_PREPARED_RELEASE:-}" ]] || die "prepared release is unavailable"
+    php "$MIRZA_PREPARED_RELEASE/health.php" --cli \
+        || die "prepared release CLI health check failed before cutover"
+    log INFO "prepared release passed its pre-cutover CLI health check"
 }
 
 activate_release() {
@@ -471,7 +582,7 @@ register_webhook() {
 restore_database_dump() {
     [[ "${MIRZA_ALLOW_DB_RESTORE:-no}" == "yes" ]] || die "database restore requires MIRZA_ALLOW_DB_RESTORE=yes"
     [[ -s "$DATABASE_BACKUP" ]] || die "validated database backup is unavailable"
-    head -n 20 "$DATABASE_BACKUP" | grep -qi 'MySQL dump' || die "database backup header is invalid"
+    head -n 20 "$DATABASE_BACKUP" | grep -Eqi '(MySQL|MariaDB) dump' || die "database backup header is invalid"
     local host database user password
     host="$(config_value dbhost)"
     database="$(config_value dbname)"

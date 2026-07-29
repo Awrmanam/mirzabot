@@ -440,30 +440,52 @@ switch ($data['actions'] ?? '') {
             if (!isset($data['content_type']) || empty($data['content_type'])) {
                 sendJsonResponse(false, "content_type empty", [], 200);
             }
-            $data['content_type'] = explode('/', $data['content_type'])[0];
-            if ($data['content_type'] == "image") {
-                file_put_contents("file.jpg", base64_decode($data['file']));
-                sendphoto($data['chat_id'], new CURLFile("file.jpg"), $data['text']);
-                unlink("file.jpg");
-            } elseif ($data['content_type'] == "video") {
-                file_put_contents("file.mp4", base64_decode($data['file']));
-                sendvideo($data['chat_id'], new CURLFile("file.mp4"), $data['text']);
-                unlink('file.mp4');
-            } elseif ($data['content_type'] == "application") {
-                file_put_contents("file.pdf", base64_decode($data['file']));
-                var_dump(sendDocument($data['chat_id'], "file.pdf", $data['text']));
-                unlink("file.pdf");
-            } elseif ($data['content_type'] == "audio") {
-                $file_name = $data[1];
-                file_put_contents("file." . $file_name, base64_decode($data['file']));
-                telegram('sendAudio', [
-                    'chat_id' => $data['chat_id'],
-                    'audio' => new CURLFile("file." . $file_name),
-                    'caption' => $data['text'],
-                ]);
-                unlink("file." . $file_name);
-            } else {
+            $contentTypeParts = explode('/', (string) $data['content_type'], 2);
+            $contentType = strtolower($contentTypeParts[0]);
+            $contentSubtype = strtolower($contentTypeParts[1] ?? '');
+            $allowedExtensions = [
+                'image' => 'jpg',
+                'video' => 'mp4',
+                'application' => 'pdf',
+                'audio' => preg_match('/^[a-z0-9]{1,10}$/', $contentSubtype) ? $contentSubtype : 'audio',
+            ];
+            if (!isset($allowedExtensions[$contentType])) {
                 sendJsonResponse(false, "content_type invalid", [], 200);
+            }
+
+            $decodedFile = base64_decode((string) $data['file'], true);
+            if ($decodedFile === false) {
+                sendJsonResponse(false, "file encoding invalid", [], 200);
+            }
+            $temporaryFile = tempnam(sys_get_temp_dir(), 'mirza-api-');
+            if ($temporaryFile === false) {
+                sendJsonResponse(false, "temporary file unavailable", [], 500);
+            }
+            $temporaryUpload = $temporaryFile . '.' . $allowedExtensions[$contentType];
+            if (!rename($temporaryFile, $temporaryUpload)) {
+                @unlink($temporaryFile);
+                sendJsonResponse(false, "temporary file unavailable", [], 500);
+            }
+
+            try {
+                if (file_put_contents($temporaryUpload, $decodedFile) === false) {
+                    sendJsonResponse(false, "temporary file write failed", [], 500);
+                }
+                if ($contentType === 'image') {
+                    sendphoto($data['chat_id'], new CURLFile($temporaryUpload), $data['text']);
+                } elseif ($contentType === 'video') {
+                    sendvideo($data['chat_id'], new CURLFile($temporaryUpload), $data['text']);
+                } elseif ($contentType === 'application') {
+                    sendDocument($data['chat_id'], $temporaryUpload, $data['text']);
+                } else {
+                    telegram('sendAudio', [
+                        'chat_id' => $data['chat_id'],
+                        'audio' => new CURLFile($temporaryUpload),
+                        'caption' => $data['text'],
+                    ]);
+                }
+            } finally {
+                @unlink($temporaryUpload);
             }
         }
         sendJsonResponse(true, "Successful");

@@ -50,6 +50,8 @@ if [[ ! -s "$MIRZA_SHARED_DIR/config.php" && -s "$MIRZA_LEGACY_PATH/config.php" 
     log INFO "legacy config copied to shared storage before release migration"
 fi
 
+migrate_legacy_persistent_data
+
 if [[ ! -s "$MIRZA_SHARED_DIR/config.php" || "${MIRZA_REPAIR_CONFIG:-no}" == "yes" ]]; then
     ensure_database "$MIRZA_DB_NAME" "$MIRZA_DB_USER" "$MIRZA_DB_PASSWORD"
 fi
@@ -63,6 +65,7 @@ else
 fi
 
 run_migrations
+pre_activate_health_check
 activate_release
 configure_apache_http
 obtain_certificate

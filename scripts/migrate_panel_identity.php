@@ -86,7 +86,8 @@ function migrationCreateBackup(
         '--user=' . $username,
         $database,
     ];
-    $environment = array_merge($_ENV, ['MYSQL_PWD' => $password]);
+    $baseEnvironment = getenv();
+    $environment = array_merge(is_array($baseEnvironment) ? $baseEnvironment : [], ['MYSQL_PWD' => $password]);
     $pipes = [];
     $process = proc_open($command, [0 => ['pipe', 'r'], 1 => $output, 2 => ['pipe', 'w']], $pipes, null, $environment);
     if (!is_resource($process)) {
@@ -108,9 +109,9 @@ function migrationCreateBackup(
     }
 
     $header = file_get_contents($backupPath, false, null, 0, 4096);
-    if (!is_string($header) || stripos($header, 'MySQL dump') === false) {
+    if (!is_string($header) || !preg_match('/(?:MySQL|MariaDB) dump/i', $header)) {
         @unlink($backupPath);
-        throw new RuntimeException('Backup validation failed: mysqldump header not found');
+        throw new RuntimeException('Backup validation failed: database dump header not found');
     }
 
     return $backupPath;

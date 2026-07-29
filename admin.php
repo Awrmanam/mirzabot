@@ -11478,12 +11478,17 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         sendmessage($from_id, "📌 برای کاربری شماره کارت فعال نشده است", $CartManage, 'HTML');
         return;
     }
-    $filename = 'cartlist.txt';
+    $filename = tempnam(sys_get_temp_dir(), 'mirza-card-list-');
+    if ($filename === false) {
+        error_log('Unable to allocate a temporary card-list file');
+        sendmessage($from_id, "خطا در ساخت فایل خروجی", $CartManage, 'HTML');
+        return;
+    }
     foreach ($listusers as $id_user) {
         file_put_contents($filename, $id_user['id'] . "\n", FILE_APPEND);
     }
     sendDocument($from_id, $filename, "🪪 لیست کاربرانی که شماره کارت برای آنها فعال است");
-    unlink($filename);
+    @unlink($filename);
 } elseif ($text == "🎉 پورسانت فقط برای خرید اول" && $adminrulecheck['rule'] == "administrator") {
     $marzbanporsant_one_buy = select("affiliates", "*", null, null, "select");
     $keyboardDiscountaffiliates = json_encode([

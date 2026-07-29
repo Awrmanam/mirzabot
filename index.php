@@ -1235,7 +1235,7 @@ $textconnect
         ]);
         update("user", "Processing_value", $nameloc['username'], "id", $from_id);
         $subscriptionurl = $DataUserOut['subscription_url'];
-        $urlimage = "{$marzban_list_get['inboundid']}_{$nameloc['username']}.conf";
+        $urlimage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "{$marzban_list_get['inboundid']}_{$nameloc['username']}.conf";
         file_put_contents($urlimage, $subscriptionurl);
         telegram('senddocument', [
             'chat_id' => $from_id,
@@ -1260,7 +1260,7 @@ $textconnect
         update("user", "Processing_value", $nameloc['username'], "id", $from_id);
         $subscriptionurl = $DataUserOut['subscription_url'];
         $randomString = bin2hex(random_bytes(3));
-        $urlimage = "$from_id$randomString.png";
+        $urlimage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "$from_id$randomString.png";
         $qrCode = createqrcode($subscriptionurl);
         file_put_contents($urlimage, $qrCode->getString());
         addBackgroundImage($urlimage, $qrCode, 'images.jpg');
@@ -1338,7 +1338,7 @@ $textconnect
     if ($dataget[2] == "1520") {
         for ($i = 0; $i < count($DataUserOut['links']); ++$i) {
             $randomString = bin2hex(random_bytes(3));
-            $urlimage = "$from_id$randomString.png";
+            $urlimage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "$from_id$randomString.png";
             $qrCode = createqrcode($DataUserOut['links'][$i]);
             file_put_contents($urlimage, $qrCode->getString());
             addBackgroundImage($urlimage, $qrCode, 'images.jpg');
@@ -1353,7 +1353,7 @@ $textconnect
         return;
     }
     $randomString = bin2hex(random_bytes(3));
-    $urlimage = "$from_id$randomString.png";
+    $urlimage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "$from_id$randomString.png";
     $qrCode = createqrcode($DataUserOut['links'][$dataget[2]]);
     file_put_contents($urlimage, $qrCode->getString());
     addBackgroundImage($urlimage, $qrCode, 'images.jpg');

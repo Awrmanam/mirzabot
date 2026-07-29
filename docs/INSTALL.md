@@ -58,7 +58,10 @@ The deployment layout is:
 └── shared/
     ├── config.php
     ├── acme/
-    └── backups/
+    ├── backups/
+    ├── runtime/      # logs, mutable JSON/state and uploaded branding
+    ├── storage/
+    └── vpnbot/
 ```
 
 `/var/www/html/mirzaprobotconfig` becomes a compatibility symlink to

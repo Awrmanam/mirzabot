@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 require_root
 detect_os
+verify_php_runtime
 ensure_directories
 
 [[ -L "$MIRZA_CURRENT_LINK" || -d "$MIRZA_LEGACY_PATH" ]] || die "no existing MirzaBot installation was detected"
@@ -22,6 +23,8 @@ if [[ ! -s "$MIRZA_SHARED_DIR/config.php" && -s "$MIRZA_LEGACY_PATH/config.php" 
     log INFO "legacy Step 2 config copied to shared storage"
 fi
 [[ -s "$MIRZA_SHARED_DIR/config.php" ]] || die "no existing config.php was found"
+
+migrate_legacy_persistent_data
 
 export MIRZA_WEBHOOK_SECRET="${MIRZA_WEBHOOK_SECRET:-$(generate_secret 24)}"
 write_config_atomic
@@ -38,6 +41,7 @@ log INFO "starting staged MirzaBot update"
 backup_database
 prepare_release
 run_migrations
+pre_activate_health_check
 activate_release
 apache2ctl configtest
 systemctl reload apache2

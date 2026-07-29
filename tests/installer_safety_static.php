@@ -37,6 +37,13 @@ $check(strpos($common, '22.04) MIRZA_EXPECTED_PHP="8.1"') !== false, 'Ubuntu 22.
 $check(strpos($common, '24.04) MIRZA_EXPECTED_PHP="8.3"') !== false, 'Ubuntu 24.04 expects repository PHP 8.3');
 $check(strpos($common, 'mv -Tf -- "$next_link" "$MIRZA_CURRENT_LINK"') !== false, 'release cutover is an atomic same-filesystem symlink replacement');
 $check(strpos($common, 'ln -s ../../shared/config.php') !== false, 'persistent config remains in shared storage');
+$check(strpos($common, 'migrate_legacy_persistent_data') !== false, 'legacy runtime data is copied to shared storage');
+$check(strpos($common, 'link_shared_runtime') !== false, 'mutable runtime paths are linked outside immutable releases');
+$check(strpos($common, 'images.jpg text.json') !== false, 'mutable branding and bot text survive release replacement');
+$check(
+    $position($install, 'pre_activate_health_check') < $position($install, 'activate_release'),
+    'prepared release health check runs before the atomic cutover'
+);
 $check(strpos($common, 'chmod 0640 "$temp_config"') !== false, 'new config permissions exclude world access');
 $check(
     $position($install, 'prepare_release')

@@ -1965,7 +1965,7 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
     }
     if ($STATUS_SEND_MESSAGE_PHOTO) {
         if ($panel_info['type'] == "WGDashboard") {
-            $urlimage = "{$panel_info['inboundid']}_{$invoice_id}.conf";
+            $urlimage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "{$panel_info['inboundid']}_{$invoice_id}.conf";
             file_put_contents($urlimage, $sub_link);
             telegram('senddocument', [
                 'chat_id' => $user_id,
@@ -1976,7 +1976,7 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
             ]);
             unlink($urlimage);
         } else {
-            $urlimage = "$user_id$invoice_id.png";
+            $urlimage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . "$user_id$invoice_id.png";
             $qrCode = createqrcode($out_put_qrcode);
             file_put_contents($urlimage, $qrCode->getString());
             addBackgroundImage($urlimage, $qrCode, $image);
