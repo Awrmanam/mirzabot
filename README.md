@@ -101,7 +101,7 @@ Ensure you have the following before installation:
 Run the following command in your server terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh -o install.sh && sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh -o install.sh && sudo bash install.sh
 ```
 
 When prompted, **select option 1** to complete the installation.
@@ -130,7 +130,7 @@ enabled. Mirza calls the API endpoints directly.
 To update your bot to the latest version, use the following command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh -o install.sh && sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh -o install.sh && sudo bash install.sh
 ```
 When prompted, **select option update** to remove the bot.
 ---
@@ -140,7 +140,7 @@ When prompted, **select option update** to remove the bot.
 If you want to completely remove the bot from your server, run the following command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh -o install.sh && sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/Awrmanam/mirzabot/premium-emoji-safe-test-20260729/install.sh -o install.sh && sudo bash install.sh
 ```
 
 When prompted, **select option 3** to remove the bot.
