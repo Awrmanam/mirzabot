@@ -16,7 +16,6 @@ readonly MIRZA_REPOSITORY="Awrmanam/mirzabot"
 WORK_DIR=""
 PREVIOUS_RELEASE=""
 CUTOVER_COMPLETE=0
-MIGRATION_STARTED=0
 DATABASE_BACKUP=""
 
 timestamp() {
@@ -157,6 +156,7 @@ write_config_atomic() {
     if [[ -s "$config_path" && "${MIRZA_REPAIR_CONFIG:-no}" != "yes" ]]; then
         php -l "$config_path" >/dev/null || die "existing shared config.php is invalid"
         local current_webhook_secret
+        # shellcheck disable=SC2016
         current_webhook_secret="$(php -r '
             ob_start();
             require $argv[1];
@@ -170,6 +170,7 @@ write_config_atomic() {
             local upgraded_config
             upgraded_config="$(mktemp "$MIRZA_SHARED_DIR/.config.php.XXXXXX")"
             cp -- "$config_path" "$upgraded_config"
+            # shellcheck disable=SC2016
             printf "\n"'$telegram_webhook_secret'" = '%s';\n" "$MIRZA_WEBHOOK_SECRET" >>"$upgraded_config"
             chmod 0640 "$upgraded_config"
             chown root:www-data "$upgraded_config"
@@ -244,7 +245,8 @@ prepare_release() {
         [[ -f "$source_dir/$required" ]] || die "release is missing ${required}"
     done
 
-    local release_id="${MIRZA_RELEASE_ID:-$(date -u +%Y%m%d%H%M%S)-${MIRZA_RELEASE_REF:0:12}}"
+    local release_ref_label="${MIRZA_RELEASE_REF:-local}"
+    local release_id="${MIRZA_RELEASE_ID:-$(date -u +%Y%m%d%H%M%S)-${release_ref_label:0:12}}"
     [[ "$release_id" =~ ^[A-Za-z0-9._-]{1,80}$ ]] || die "invalid release id"
     MIRZA_PREPARED_RELEASE="$MIRZA_RELEASES_DIR/$release_id"
     [[ ! -e "$MIRZA_PREPARED_RELEASE" ]] || die "release directory already exists"
@@ -269,6 +271,7 @@ config_value() {
         dbhost|dbname|usernamedb|passworddb|APIKEY|adminnumber|domainhosts|usernamebot|telegram_webhook_secret) ;;
         *) die "unsupported config key" ;;
     esac
+    # shellcheck disable=SC2016
     php -r '
         ob_start();
         require $argv[1];
@@ -295,7 +298,6 @@ backup_database() {
 
 run_migrations() {
     [[ -n "${MIRZA_PREPARED_RELEASE:-}" ]] || die "release is not prepared"
-    MIGRATION_STARTED=1
     php "$MIRZA_PREPARED_RELEASE/table.php"
     php "$MIRZA_PREPARED_RELEASE/scripts/migrate_custom_emoji.php"
     local migration_args=(--backup-dir="$MIRZA_SHARED_DIR/backups")
@@ -311,7 +313,8 @@ activate_release() {
     if [[ -L "$MIRZA_CURRENT_LINK" ]]; then
         PREVIOUS_RELEASE="$(readlink -f "$MIRZA_CURRENT_LINK")"
     elif [[ -d "$MIRZA_LEGACY_PATH" && ! -L "$MIRZA_LEGACY_PATH" ]]; then
-        local legacy_backup="$MIRZA_SHARED_DIR/legacy-$(date -u +%Y%m%d%H%M%S)"
+        local legacy_backup
+        legacy_backup="$MIRZA_SHARED_DIR/legacy-$(date -u +%Y%m%d%H%M%S)"
         mv -- "$MIRZA_LEGACY_PATH" "$legacy_backup"
         PREVIOUS_RELEASE="$legacy_backup"
         log INFO "legacy directory preserved under shared before symlink migration"
@@ -387,7 +390,8 @@ verify_dns() {
 
 obtain_certificate() {
     verify_dns
-    local challenge="mirza-$(generate_secret 8)"
+    local challenge
+    challenge="mirza-$(generate_secret 8)"
     printf '%s' "$challenge" >"$MIRZA_SHARED_DIR/acme/$challenge"
     local served
     served="$(curl -fsS --max-time 15 "http://${MIRZA_DOMAIN}/.well-known/acme-challenge/${challenge}")"
@@ -444,12 +448,14 @@ register_webhook() {
         "https://api.telegram.org/bot${MIRZA_BOT_TOKEN}/setWebhook" \
         --data-urlencode "url=${webhook_url}" \
         --data-urlencode "secret_token=${MIRZA_WEBHOOK_SECRET}")"
+    # shellcheck disable=SC2016
     php -r '
         $data = json_decode(stream_get_contents(STDIN), true);
         exit(is_array($data) && ($data["ok"] ?? false) === true ? 0 : 1);
     ' <<<"$response" || die "Telegram setWebhook returned ok=false"
 
     response="$(curl -fsS "https://api.telegram.org/bot${MIRZA_BOT_TOKEN}/getWebhookInfo")"
+    # shellcheck disable=SC2016
     php -r '
         $data = json_decode(stream_get_contents(STDIN), true);
         exit(

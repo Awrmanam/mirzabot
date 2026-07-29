@@ -5,6 +5,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export MIRZA_LOG_FILE="${TMPDIR:-/tmp}/mirzabot-installer-helper-test.log"
 # shellcheck source=../scripts/installer/common.sh
+# shellcheck disable=SC1091
 . "$ROOT/scripts/installer/common.sh"
 
 failures=0

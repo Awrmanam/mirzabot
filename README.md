@@ -1,5 +1,18 @@
 # 🤖 Bot Mirza Panel
 
+## Step 3 staging documentation
+
+This branch adds canonical panel identity, safe Premium Emoji panel CRUD and a
+staged installer/update layout. It is intentionally not tagged or declared
+production-ready until the VM acceptance procedure is complete.
+
+- [Staging installation](docs/INSTALL.md)
+- [Update from Step 2](docs/UPDATE.md)
+- [Rollback](docs/ROLLBACK.md)
+- [Backup and restore](docs/BACKUP_RESTORE.md)
+- [Security notes](docs/SECURITY_NOTES.md)
+- [Panel schema](docs/PANEL_SCHEMA.md)
+- [Changelog](CHANGELOG.md)
 
 A Powerful Bot for Selling VPN Services with Auto Configuration Build.
 

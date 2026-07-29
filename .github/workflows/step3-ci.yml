@@ -1,0 +1,44 @@
+name: Step 3 safety checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli php-sqlite3 shellcheck
+      - name: Shell validation
+        run: |
+          bash -n install.sh update.sh rollback.sh uninstall.sh
+          bash -n scripts/installer/common.sh tests/installer_helpers.sh
+          shellcheck install.sh update.sh rollback.sh uninstall.sh
+          shellcheck scripts/installer/common.sh tests/installer_helpers.sh
+          tests/installer_helpers.sh
+      - name: PHP lint
+        run: |
+          php -l panel_service.php
+          php -l webhook_security.php
+          php -l health.php
+          php -l scripts/migrate_panel_identity.php
+          php -l scripts/cleanup_orphan_panels.php
+      - name: Regression tests
+        run: |
+          php tests/custom_emoji_step1_static.php
+          php tests/custom_emoji_step2_performance.php
+          php tests/panel_identity_regression.php
+          php tests/panel_crud_integration.php
+          php tests/panel_migration_static.php
+          php tests/installer_safety_static.php
+          php scripts/cleanup_orphan_panels.php --fixture=tests/fixtures/panel_orphans.json
