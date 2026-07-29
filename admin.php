@@ -3232,10 +3232,13 @@ $caption";
     sendmessage($from_id, $textbotlang['Admin']['Product']['Service_location'], $json_list_marzban_panel, 'HTML');
     step('get_location', $from_id);
 } elseif ($user['step'] == "get_location") {
-    $marzban_list[] = '/all';
-    if (!in_array($text, $marzban_list)) {
-        sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
-        return;
+    if ($text !== '/all') {
+        $resolvedPanelName = styledResolvePanelName($text);
+        if ($resolvedPanelName === false) {
+            sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
+            return;
+        }
+        $text = $resolvedPanelName;
     }
     savedata("save", "Location", $text);
     if ($setting['statuscategorygenral'] == "oncategorys") {
@@ -3254,11 +3257,12 @@ $caption";
     sendmessage($from_id, $textbotlang['Admin']['Product']['GetLimit'], $backadmin, 'HTML');
     step('get_time', $from_id);
 } elseif ($user['step'] == "getcategory") {
-    $category = select("category", "*", "remark", $text, "count");
-    if ($category == 0) {
+    $resolvedCategoryName = styledResolveCategoryName($text);
+    if ($resolvedCategoryName === false) {
         sendmessage($from_id, "❌ دسته بندی انتخاب شده وجود ندارد از بخش پلن ها > اضافه کردن دسته بندی دسته بندی خود را اضافه کنید سپس محصول را اضافه نمایید.", KeyboardCategoryadmin(), 'HTML');
         return;
     }
+    $text = $resolvedCategoryName;
     savedata("save", "category", $text);
     $userdata = json_decode($user['Processing_value'], true);
     $panel = select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");

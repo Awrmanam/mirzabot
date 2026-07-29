@@ -394,6 +394,27 @@ function styledResolvePanelName($receivedName)
     return false;
 }
 
+function styledResolveCategoryName($receivedName)
+{
+    global $pdo;
+    $receivedName = (string) $receivedName;
+    $stmt = $pdo->prepare("SELECT remark FROM category WHERE remark = ? LIMIT 1");
+    $stmt->execute([$receivedName]);
+    $exactName = $stmt->fetchColumn();
+    if ($exactName !== false) {
+        return (string) $exactName;
+    }
+    $stmt = $pdo->prepare("SELECT remark FROM category");
+    $stmt->execute();
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $category) {
+        $storedName = (string) $category['remark'];
+        if (styledPanelDisplayName($storedName) === $receivedName) {
+            return $storedName;
+        }
+    }
+    return false;
+}
+
 function styledPanelNameExists($candidateName, $excludeStoredName = '')
 {
     global $pdo;
