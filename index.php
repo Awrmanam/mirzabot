@@ -5,6 +5,8 @@ ini_set('default_charset', 'UTF-8');
 ini_set('error_log', 'error_log');
 ini_set('memory_limit', '-1');
 require_once 'config.php';
+require_once 'webhook_security.php';
+mirzaEnforceTelegramWebhookSecret((string) ($telegram_webhook_secret ?? ''));
 require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';

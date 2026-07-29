@@ -1493,6 +1493,3 @@ $connect->query("ALTER TABLE `invoice` CHANGE `time_sell` `time_sell` VARCHAR(20
 $connect->query("ALTER TABLE marzban_panel MODIFY name_panel VARCHAR(255) COLLATE utf8mb4_bin");
 $connect->query("ALTER TABLE product MODIFY name_product VARCHAR(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin");
 $connect->query("ALTER TABLE help MODIFY name_os VARCHAR(500) COLLATE utf8mb4_bin");
-telegram('setwebhook', [
-    'url' => "https://$domainhosts/index.php"
-]);
