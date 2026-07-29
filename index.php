@@ -1209,18 +1209,33 @@ $textconnect
         }
     } else {
         $id_invoice = $dataget[1];
-        $nameloc = select("invoice", "*", "id_invoice", $id_invoice, "select");
+        $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_invoice = :id_invoice AND id_user = :id_user LIMIT 1");
+        $stmt->execute([':id_invoice' => $id_invoice, ':id_user' => $from_id]); $nameloc = $stmt->fetch(PDO::FETCH_ASSOC);
     }
-    if ($nameloc == false)
-        return;
+    if ($nameloc == false) {
+        sendmessage($from_id, $textbotlang['users']['stateus']['UserNotFound'], null, 'html'); return;
+    }
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
-    $Check_token = token_panel($marzban_list_get['url_panel'], $marzban_list_get['username_panel'], $marzban_list_get['password_panel']);
-    $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $nameloc['username']);
-    if ($DataUserOut['status'] == "Unsuccessful") {
-        sendmessage($from_id, $textbotlang['users']['stateus']['error'], null, 'html');
-        return;
+    if (!$marzban_list_get) {
+        $rawPanelName = styledResolvePanelName($nameloc['Service_location']);
+        $marzban_list_get = $rawPanelName === false ? false : select("marzban_panel", "*", "name_panel", $rawPanelName, "select");
     }
-    $subscriptionurl = $DataUserOut['subscription_url'];
+    if (!$marzban_list_get) {
+        serviceDeliveryLog('panel_lookup', [], $id_invoice, $nameloc['username'], null, null, true);
+        sendmessage($from_id, $textbotlang['users']['stateus']['error'], null, 'html'); return;
+    }
+    $DataUserOut = $ManagePanel->DataUser($marzban_list_get['name_panel'], $nameloc['username']);
+    $subscriptionurl = trim((string) ($DataUserOut['subscription_url'] ?? ''));
+    if ($subscriptionurl === '') $subscriptionurl = trim((string) ($nameloc['user_info'] ?? ''));
+    if ($subscriptionurl === '' || ($marzban_list_get['type'] != 'WGDashboard'
+        && filter_var($subscriptionurl, FILTER_VALIDATE_URL) === false)) {
+        serviceDeliveryLog('retrieve_link', $marzban_list_get, $id_invoice, $nameloc['username'], null, null, true);
+        sendmessage($from_id, "❌ لینک اشتراک در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.", null, 'html'); return;
+    }
+    if (!persistServiceDelivery($id_invoice, $from_id, $nameloc['username'], $subscriptionurl, $marzban_list_get)) {
+        sendmessage($from_id, "❌ ذخیره اطلاعات سرویس انجام نشد. لطفاً با پشتیبانی تماس بگیرید.", null, 'html'); return;
+    }
+    $sendResult = null; try {
     if ($marzban_list_get['type'] == "WGDashboard") {
         $textsub = "فایل اشتراک شما";
         $bakinfos = json_encode([
@@ -1231,10 +1246,9 @@ $textconnect
             ]
         ]);
         update("user", "Processing_value", $nameloc['username'], "id", $from_id);
-        $subscriptionurl = $DataUserOut['subscription_url'];
         $urlimage = "{$marzban_list_get['inboundid']}_{$nameloc['username']}.conf";
         file_put_contents($urlimage, $subscriptionurl);
-        telegram('senddocument', [
+        $sendResult = telegram('senddocument', [
             'chat_id' => $from_id,
             'document' => new CURLFile($urlimage),
             'reply_markup' => $bakinfos,
@@ -1243,10 +1257,11 @@ $textconnect
         ]);
         unlink($urlimage);
     } else {
+        $safeSubscriptionUrl = htmlspecialchars($subscriptionurl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $textsub = "
 {$textbotlang['users']['stateus']['linksub']}
-           
-<code>$subscriptionurl</code>";
+
+<code>$safeSubscriptionUrl</code>";
         $bakinfos = json_encode([
             'inline_keyboard' => [
                 [
@@ -1255,13 +1270,12 @@ $textconnect
             ]
         ]);
         update("user", "Processing_value", $nameloc['username'], "id", $from_id);
-        $subscriptionurl = $DataUserOut['subscription_url'];
         $randomString = bin2hex(random_bytes(3));
         $urlimage = "$from_id$randomString.png";
         $qrCode = createqrcode($subscriptionurl);
         file_put_contents($urlimage, $qrCode->getString());
         addBackgroundImage($urlimage, $qrCode, 'images.jpg');
-        telegram('sendphoto', [
+        $sendResult = telegram('sendphoto', [
             'chat_id' => $from_id,
             'photo' => new CURLFile($urlimage),
             'reply_markup' => $bakinfos,
@@ -1269,6 +1283,13 @@ $textconnect
             'parse_mode' => "HTML",
         ]);
         unlink($urlimage);
+    }
+    } catch (Throwable $exception) {
+        if (isset($urlimage) && is_file($urlimage)) @unlink($urlimage); serviceDeliveryLog('retrieve_prepare', $marzban_list_get, $id_invoice, $nameloc['username'], null, $exception, false);
+    }
+    if (empty($sendResult['ok'])) {
+        serviceDeliveryLog('retrieve_telegram', $marzban_list_get, $id_invoice, $nameloc['username'], $sendResult, null, false);
+        $sendResult = sendmessage($from_id, $marzban_list_get['type'] == 'WGDashboard' ? "❌ ارسال فایل سرویس انجام نشد. لطفاً دوباره تلاش کنید." : html_entity_decode(strip_tags($textsub)), $bakinfos, null);
     }
 } elseif (preg_match('/removeauto-(\w+)/', $datain, $dataget)) {
     $id_invoice = $dataget[1];

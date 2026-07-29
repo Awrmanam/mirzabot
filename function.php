@@ -1946,12 +1946,43 @@ function isBase64($string)
     }
     return false;
 }
+function serviceDeliveryLog($stage, $panel_info, $invoice_id, $username_service, $response = null, $exception = null, $empty = false) {
+    $log = ['stage' => $stage, 'panel_type' => $panel_info['type'] ?? 'unknown', 'service_id' => (string) $invoice_id, 'username_hash' => hash('sha256', (string) $username_service), 'http_status' => is_array($response) ? ($response['error_code'] ?? null) : null, 'exception' => $exception instanceof Throwable ? get_class($exception) : null, 'subscription_empty' => (bool) $empty];
+    error_log('[service_delivery] ' . json_encode($log, JSON_UNESCAPED_SLASHES));
+}
+function persistServiceDelivery($invoice_id, $user_id, $username_service, $service_data, $panel_info = []) {
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare("UPDATE invoice SET username = ?, user_info = ? WHERE id_invoice = ? AND id_user = ?");
+        $saved = $stmt->execute([(string) $username_service, (string) $service_data, (string) $invoice_id, (string) $user_id]);
+        $stmt = $pdo->prepare("SELECT username, user_info FROM invoice WHERE id_invoice = ? AND id_user = ? LIMIT 1");
+        $stmt->execute([(string) $invoice_id, (string) $user_id]); $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $saved = $saved && is_array($row) && (string) $row['username'] === (string) $username_service && (string) $row['user_info'] === (string) $service_data;
+    } catch (Throwable $exception) { serviceDeliveryLog('database_write', $panel_info, $invoice_id, $username_service, null, $exception, $service_data === ''); return false; }
+    if (!$saved) serviceDeliveryLog('database_write', $panel_info, $invoice_id, $username_service, null, null, $service_data === '');
+    return $saved;
+}
 function sendMessageService($panel_info, $config, $sub_link, $username_service, $reply_markup, $caption, $invoice_id, $user_id = null, $image = 'images.jpg')
 {
-    global $setting, $from_id;
+    global $setting, $from_id, $ManagePanel;
     if (!check_active_btn($setting['keyboardmain'], "text_help"))
         $reply_markup = null;
     $user_id = $user_id == null ? $from_id : $user_id;
+    $config = is_array($config) ? array_values($config) : [];
+    $service_data = trim((string) $sub_link);
+    if ($service_data === '' && $username_service !== '') {
+        try {
+            $regenerated = $ManagePanel->DataUser($panel_info['name_panel'], $username_service);
+            $service_data = trim((string) ($regenerated['subscription_url'] ?? ''));
+            if ($sub_link === '' && ($panel_info['sublink'] ?? '') == 'onsublink') $sub_link = $service_data;
+            if (!$config && isset($regenerated['links']) && is_array($regenerated['links'])) $config = $regenerated['links'];
+        } catch (Throwable $exception) { serviceDeliveryLog('regenerate', $panel_info, $invoice_id, $username_service, null, $exception, true); }
+    }
+    if ($service_data === '' && $config) $service_data = (string) $config[0];
+    if ($service_data === '' || !persistServiceDelivery($invoice_id, $user_id, $username_service, $service_data, $panel_info)) {
+        serviceDeliveryLog('prepare_delivery', $panel_info, $invoice_id, $username_service, null, null, $service_data === '');
+        sendmessage($user_id, "❌ اطلاعات سرویس ذخیره نشد یا لینک اشتراک در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.", null, 'HTML'); return false;
+    }
     $STATUS_SEND_MESSAGE_PHOTO = $panel_info['config'] == "onconfig" && count($config) != 1 ? false : true;
     $out_put_qrcode = "";
     if ($panel_info['type'] == "Manualsale" || $panel_info['type'] == "ibsng" || $panel_info['type'] == "mikrotik") {
@@ -1960,14 +1991,15 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
         $out_put_qrcode = $sub_link;
     } elseif ($panel_info['sublink'] == "onsublink") {
         $out_put_qrcode = $sub_link;
-    } elseif ($panel_info['config'] == "onconfig") {
+    } elseif ($panel_info['config'] == "onconfig" && isset($config[0])) {
         $out_put_qrcode = $config[0];
-    }
-    if ($STATUS_SEND_MESSAGE_PHOTO) {
+    } $sendResult = null;
+    try {
+    if ($STATUS_SEND_MESSAGE_PHOTO && $out_put_qrcode !== '') {
         if ($panel_info['type'] == "WGDashboard") {
             $urlimage = "{$panel_info['inboundid']}_{$invoice_id}.conf";
             file_put_contents($urlimage, $sub_link);
-            telegram('senddocument', [
+            $sendResult = telegram('senddocument', [
                 'chat_id' => $user_id,
                 'document' => new CURLFile($urlimage),
                 'reply_markup' => $reply_markup,
@@ -1980,7 +2012,7 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
             $qrCode = createqrcode($out_put_qrcode);
             file_put_contents($urlimage, $qrCode->getString());
             addBackgroundImage($urlimage, $qrCode, $image);
-            telegram('sendphoto', [
+            $sendResult = telegram('sendphoto', [
                 'chat_id' => $user_id,
                 'photo' => new CURLFile($urlimage),
                 'reply_markup' => $reply_markup,
@@ -1990,13 +2022,20 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
             unlink($urlimage);
         }
     } else {
-        sendmessage($user_id, $caption, $reply_markup, 'HTML');
+        $sendResult = sendmessage($user_id, $caption, $reply_markup, 'HTML');
+    }
+    } catch (Throwable $exception) {
+        if (isset($urlimage) && is_file($urlimage)) @unlink($urlimage); serviceDeliveryLog('telegram_prepare', $panel_info, $invoice_id, $username_service, null, $exception, false);
+    }
+    if (empty($sendResult['ok'])) {
+        serviceDeliveryLog('telegram_send', $panel_info, $invoice_id, $username_service, $sendResult, null, false); $sendResult = sendmessage($user_id, $panel_info['type'] == 'WGDashboard' ? "❌ ارسال فایل سرویس انجام نشد. لطفاً دوباره تلاش کنید." : strip_tags($caption), $reply_markup, null);
     }
     if ($panel_info['config'] == "onconfig" && $setting['status_keyboard_config'] == "1") {
         if (is_array($config)) {
             sendmessage($user_id, "📌 جهت دریافت کانفیگ روی دکمه دریافت کانفیگ کلیک کنید", keyboard_config($config, $invoice_id, false), 'HTML');
         }
     }
+    return !empty($sendResult['ok']);
 }
 function isValidInvitationCode($setting, $fromId, $verfy_status)
 {
