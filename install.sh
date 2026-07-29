@@ -4,7 +4,7 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "\033[31m[ERROR]\033[0m Please run this script as \033[1mroot\033[0m."
     exit 1
 fi
-readonly MIRZA_SOURCE_BRANCH="premium-emoji-optimization-step2-20260729"
+readonly MIRZA_SOURCE_BRANCH="premium-emoji-install-safety-step3-20260729"
 # Function to update the script itself automatically
 function self_update_script() {
     local MASTER_PATH="/root/install.sh"
@@ -402,42 +402,76 @@ function install_bot() {
         echo -e "\e[91mError: Failed to restart Apache2 service.\033[0m"
         exit 1
     }
-    # Check and remove existing directory before cloning Git repository
     # CHANGED: Folder name to mirzaprobotconfig
     BOT_DIR="/var/www/html/mirzaprobotconfig"
+    # Download only from the pinned source branch.
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
+    echo -e "\033[33mDownloading Mirza Pro from the pinned branch...\033[0m"
+    # Download and extract the repository
+    TEMP_DIR=$(mktemp -d /tmp/mirzaprobot.XXXXXX) || {
+        echo -e "\e[91mError: Failed to create a temporary download directory.\033[0m"
+        exit 1
+    }
+    wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
+        echo -e "\e[91mError: Failed to download the specified version.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    }
+    unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR" || {
+        echo -e "\e[91mError: Failed to extract the specified version.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    }
+    # Find the extracted directory dynamically (usually mirza_pro-main)
+    EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+    if [ -z "$EXTRACTED_DIR" ] || [ ! -f "$EXTRACTED_DIR/emoji_system.php" ] || [ ! -f "$EXTRACTED_DIR/scripts/migrate_custom_emoji.php" ]; then
+        echo -e "\e[91mError: Downloaded package is incomplete. Existing files were not changed.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    # Replace an existing directory only after the new package passes validation.
+    BACKUP_DIR=""
+    CUTOVER_ACTIVE=0
+    rollback_install_cutover() {
+        local exit_code=$?
+        if [ "$CUTOVER_ACTIVE" -eq 1 ]; then
+            sudo rm -rf "$BOT_DIR"
+            if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+                sudo mv "$BACKUP_DIR" "$BOT_DIR"
+            fi
+        fi
+        rm -rf "$TEMP_DIR"
+        exit "$exit_code"
+    }
+    trap rollback_install_cutover EXIT
     if [ -d "$BOT_DIR" ]; then
-        echo -e "\e[93mDirectory $BOT_DIR already exists. Removing...\033[0m"
-        sudo rm -rf "$BOT_DIR" || {
-            echo -e "\e[91mError: Failed to remove existing directory $BOT_DIR.\033[0m"
+        BACKUP_DIR="${BOT_DIR}.backup.$$"
+        echo -e "\e[93mDirectory $BOT_DIR already exists. Keeping a rollback copy during installation...\033[0m"
+        sudo mv "$BOT_DIR" "$BACKUP_DIR" || {
+            echo -e "\e[91mError: Failed to create a rollback copy of $BOT_DIR.\033[0m"
+            rm -rf "$TEMP_DIR"
             exit 1
         }
     fi
-    # Create bot directory
+    CUTOVER_ACTIVE=1
     sudo mkdir -p "$BOT_DIR"
     if [ ! -d "$BOT_DIR" ]; then
         echo -e "\e[91mError: Failed to create directory $BOT_DIR.\033[0m"
         exit 1
     fi
-    # Download only from the pinned source branch.
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
-    echo -e "\033[33mDownloading Mirza Pro from the pinned branch...\033[0m"
-    # Download and extract the repository
-    TEMP_DIR="/tmp/mirzaprobot"
-    mkdir -p "$TEMP_DIR"
-    wget -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
-        echo -e "\e[91mError: Failed to download the specified version.\033[0m"
-        exit 1
-    }
-    unzip "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
-    # Find the extracted directory dynamically (usually mirza_pro-main)
-    EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
     cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
-        echo -e "\e[91mError: Failed to copy extracted files.\033[0m"
+        echo -e "\e[91mError: Failed to copy extracted files. Restoring the previous version.\033[0m"
         exit 1
     }
     rm -rf "$TEMP_DIR"
-    sudo chown -R www-data:www-data "$BOT_DIR"
-    sudo chmod -R 755 "$BOT_DIR"
+    sudo chown -R www-data:www-data "$BOT_DIR" || {
+        echo -e "\e[91mError: Failed to set bot ownership. Restoring the previous version.\033[0m"
+        exit 1
+    }
+    sudo chmod -R 755 "$BOT_DIR" || {
+        echo -e "\e[91mError: Failed to set bot permissions. Restoring the previous version.\033[0m"
+        exit 1
+    }
     echo -e "\n\033[33mMirza Pro config and script have been installed successfully.\033[0m"
     wait
     if [ ! -d "/root/confmirza" ]; then
@@ -768,10 +802,21 @@ EOF
         echo -e "\n\e[36mThe password is not correct.\033[0m\n"
     fi
     # Add executable permission and link (This is handled by self_update_script as well, but kept for completeness)
-    chmod +x /root/install.sh
-    ln -sf /root/install.sh /usr/local/bin/mirza
+    chmod +x /root/install.sh || {
+        echo -e "\e[91mError: Failed to make /root/install.sh executable. Restoring the previous version.\033[0m"
+        exit 1
+    }
+    ln -sf /root/install.sh /usr/local/bin/mirza || {
+        echo -e "\e[91mError: Failed to update the mirza command. Restoring the previous version.\033[0m"
+        exit 1
+    }
     # Trigger self-update to ensure next run uses latest
     self_update_script
+    CUTOVER_ACTIVE=0
+    trap - EXIT
+    if [ -n "$BACKUP_DIR" ]; then
+        sudo rm -rf "$BACKUP_DIR"
+    fi
 }
 # function install_bot_with_marzban() {
 #     # Display warning and confirmation
@@ -1266,60 +1311,115 @@ function update_bot() {
     # Fetch the pinned version from GitHub.
     ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
     # Create temporary directory
-    TEMP_DIR="/tmp/mirzaprobot_update"
-    mkdir -p "$TEMP_DIR"
+    TEMP_DIR=$(mktemp -d /tmp/mirzaprobot_update.XXXXXX) || {
+        echo -e "\e[91mError: Failed to create a temporary update directory.\033[0m"
+        exit 1
+    }
     # Download and extract
     echo -e "\e[33mDownloading latest version...\033[0m"
     wget -q -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
         echo -e "\e[91mError: Failed to download update package.\033[0m"
+        rm -rf "$TEMP_DIR"
         exit 1
     }
-    unzip -q "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
+    unzip -q "$TEMP_DIR/bot.zip" -d "$TEMP_DIR" || {
+        echo -e "\e[91mError: Failed to extract update package.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    }
     # Find extracted directory (usually mirza_pro-main)
     EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-    # Backup config file
+    if [ -z "$EXTRACTED_DIR" ] || [ ! -f "$EXTRACTED_DIR/emoji_system.php" ] || [ ! -f "$EXTRACTED_DIR/scripts/migrate_custom_emoji.php" ]; then
+        echo -e "\e[91mUpdate package is incomplete. The installed bot was not changed.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    # Stage the existing config and migration before changing live files.
     CONFIG_PATH="$BOT_DIR/config.php"
-    TEMP_CONFIG="/root/mirzapro_config_backup.php"
     if [ -f "$CONFIG_PATH" ]; then
-        cp -a "$CONFIG_PATH" "$TEMP_CONFIG" || {
-            echo -e "\e[91mConfig file backup failed!\033[0m"
+        cp -a "$CONFIG_PATH" "$EXTRACTED_DIR/config.php" || {
+            echo -e "\e[91mConfig file staging failed. The installed bot was not changed.\033[0m"
+            rm -rf "$TEMP_DIR"
             exit 1
         }
     else
-        echo -e "\e[93mWarning: config.php not found. Proceeding without backup.\033[0m"
+        echo -e "\e[91mconfig.php not found. Update aborted before changing live files.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
     fi
-    # Remove old version
-    sudo rm -rf "$BOT_DIR" || {
-        echo -e "\e[91mFailed to remove old bot files!\033[0m"
+    # This migration runs against the live database before cutover and must remain idempotent and backward-compatible.
+    php "$EXTRACTED_DIR/scripts/migrate_custom_emoji.php" || {
+        echo -e "\e[91mCustom Emoji migration failed. The installed bot was not changed.\033[0m"
+        rm -rf "$TEMP_DIR"
         exit 1
     }
-    # Move new files
-    sudo mkdir -p "$BOT_DIR"
+    # Keep the working version available for rollback during the cutover.
+    BACKUP_DIR="${BOT_DIR}.backup.$$"
+    INSTALLER_BACKUP="$TEMP_DIR/install.sh.rollback"
+    INSTALLER_EXISTED=0
+    INSTALLER_REPLACED=0
+    CUTOVER_ACTIVE=0
+    rollback_update_cutover() {
+        local exit_code=$?
+        if [ "$INSTALLER_REPLACED" -eq 1 ]; then
+            if [ "$INSTALLER_EXISTED" -eq 1 ] && [ -e "$INSTALLER_BACKUP" ]; then
+                sudo cp -a "$INSTALLER_BACKUP" /root/install.sh
+            else
+                sudo rm -f /root/install.sh
+            fi
+        fi
+        if [ "$CUTOVER_ACTIVE" -eq 1 ]; then
+            sudo rm -rf "$BOT_DIR"
+            if [ -d "$BACKUP_DIR" ]; then
+                sudo mv "$BACKUP_DIR" "$BOT_DIR"
+            fi
+        fi
+        rm -rf "$TEMP_DIR"
+        exit "$exit_code"
+    }
+    trap rollback_update_cutover EXIT
+    sudo mv "$BOT_DIR" "$BACKUP_DIR" || {
+        echo -e "\e[91mFailed to create a rollback copy of the installed bot.\033[0m"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    }
+    CUTOVER_ACTIVE=1
+    sudo mkdir -p "$BOT_DIR" || {
+        echo -e "\e[91mFailed to create the new bot directory. Restoring the previous version.\033[0m"
+        exit 1
+    }
     sudo cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || {
-        echo -e "\e[91mFile transfer failed!\033[0m"
-        exit 1
-    }
-    # Restore config file
-    if [ -f "$TEMP_CONFIG" ]; then
-        sudo mv "$TEMP_CONFIG" "$CONFIG_PATH" || {
-            echo -e "\e[91mConfig file restore failed!\033[0m"
-            exit 1
-        }
-    fi
-    php "$BOT_DIR/scripts/migrate_custom_emoji.php" || {
-        echo -e "\e[91mCustom Emoji migration failed! Update cannot complete.\033[0m"
+        echo -e "\e[91mFile transfer failed. Restoring the previous version.\033[0m"
         exit 1
     }
     # Copy the new install.sh to /root/ to ensure script self-update works next time
     if [ -f "$BOT_DIR/install.sh" ]; then
-        sudo cp "$BOT_DIR/install.sh" /root/install.sh
+        if [ -e "/root/install.sh" ]; then
+            sudo cp -a /root/install.sh "$INSTALLER_BACKUP" || {
+                echo -e "\n\e[91mFailed to back up /root/install.sh. Restoring the previous version.\033[0m"
+                exit 1
+            }
+            INSTALLER_EXISTED=1
+        fi
+        INSTALLER_REPLACED=1
+        sudo cp "$BOT_DIR/install.sh" /root/install.sh || {
+            echo -e "\n\e[91mFailed to replace /root/install.sh. Restoring the previous version.\033[0m"
+            exit 1
+        }
         echo -e "\n\e[92mCopied latest install.sh to /root/install.sh.\033[0m"
     else
-        echo -e "\n\e[91mWarning: install.sh not found in update files.\033[0m"
+        echo -e "\n\e[91mError: install.sh not found in update files. Restoring the previous version.\033[0m"
+        exit 1
     fi
     # Set permissions
-    sudo chown -R www-data:www-data "$BOT_DIR"
-    sudo chmod -R 755 "$BOT_DIR"
+    sudo chown -R www-data:www-data "$BOT_DIR" || {
+        echo -e "\e[91mFailed to set bot ownership. Restoring the previous version.\033[0m"
+        exit 1
+    }
+    sudo chmod -R 755 "$BOT_DIR" || {
+        echo -e "\e[91mFailed to set bot permissions. Restoring the previous version.\033[0m"
+        exit 1
+    }
     # Extract domain name from config for VirtualHost setup
     DOMAIN_NAME=""
     if [ -f "$CONFIG_PATH" ]; then
@@ -1410,17 +1510,26 @@ EOF
             }
         fi
     fi
-    # Cleanup
-    rm -rf "$TEMP_DIR"
-    echo -e "\n\e[92mMirza Bot updated to latest version successfully!\033[0m"
     # Ensure /root/install.sh is executable and linked to mirza
     if [ -f "/root/install.sh" ]; then
-        sudo chmod +x /root/install.sh
-        sudo ln -sf /root/install.sh /usr/local/bin/mirza
+        sudo chmod +x /root/install.sh || {
+            echo -e "\e[91mFailed to make /root/install.sh executable. Restoring the previous version.\033[0m"
+            exit 1
+        }
+        sudo ln -sf /root/install.sh /usr/local/bin/mirza || {
+            echo -e "\e[91mFailed to update the mirza command. Restoring the previous version.\033[0m"
+            exit 1
+        }
         echo -e "\e[92mEnsured /root/install.sh is executable and 'mirza' command is linked.\033[0m"
     else
-        echo -e "\e[91mError: /root/install.sh not found after update attempt.\033[0m"
+        echo -e "\e[91mError: /root/install.sh not found after update attempt. Restoring the previous version.\033[0m"
+        exit 1
     fi
+    CUTOVER_ACTIVE=0
+    trap - EXIT
+    sudo rm -rf "$BACKUP_DIR"
+    rm -rf "$TEMP_DIR"
+    echo -e "\n\e[92mMirza Bot updated to latest version successfully!\033[0m"
 }
 # Delete Function for Mirza Pro
 function remove_bot() {
