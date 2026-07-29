@@ -765,18 +765,45 @@ choose_source() {
     esac
 }
 
-# Get public server IP, cached for 1 hour (falls back to local IP)
+# Get public IPv4 address only, cached for one hour.
 get_server_ip() {
-    if [ -f "$IP_CACHE" ] && [ $(( $(date +%s) - $(stat -c %Y "$IP_CACHE" 2>/dev/null || echo 0) )) -lt 3600 ]; then
-        cat "$IP_CACHE"
-        return
+    if [ -f "$IP_CACHE" ] &&
+       [ $(( $(date +%s) - $(stat -c %Y "$IP_CACHE" 2>/dev/null || echo 0) )) -lt 3600 ]; then
+
+        local cached_ip
+        cached_ip=$(cat "$IP_CACHE" 2>/dev/null)
+
+        if [[ "$cached_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "$cached_ip"
+            return 0
+        fi
+
+        rm -f "$IP_CACHE"
     fi
-    local ip
-    ip=$(curl -fsSL --max-time 4 ifconfig.me 2>/dev/null)
-    [ -z "$ip" ] && ip=$(curl -fsSL --max-time 4 https://api.ipify.org 2>/dev/null)
-    [ -z "$ip" ] && ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    [ -z "$ip" ] && ip="n/a"
-    echo "$ip" > "$IP_CACHE"
+
+    local ip=""
+
+    ip=$(curl -4 -fsSL --max-time 8 https://api.ipify.org 2>/dev/null)
+
+    [ -z "$ip" ] && \
+        ip=$(curl -4 -fsSL --max-time 8 https://ipv4.icanhazip.com 2>/dev/null)
+
+    [ -z "$ip" ] && \
+        ip=$(ip -4 route get 1.1.1.1 2>/dev/null |
+            awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')
+
+    [ -z "$ip" ] && \
+        ip=$(hostname -I 2>/dev/null |
+            tr ' ' '\n' |
+            grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' |
+            head -n1)
+
+    if ! [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "n/a"
+        return 1
+    fi
+
+    printf '%s\n' "$ip" > "$IP_CACHE"
     echo "$ip"
 }
 
@@ -1389,12 +1416,21 @@ validate_domain() { [[ "$1" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+
 
 # 0 = points here, 1 = points elsewhere, 2 = could not resolve
 domain_points_here() {
-    local dom="$1" myip resolved
-    myip=$(get_server_ip)
-    resolved=$(getent ahostsv4 "$dom" 2>/dev/null | awk '{print $1; exit}')
-    [ -z "$resolved" ] && resolved=$(getent hosts "$dom" 2>/dev/null | awk '{print $1; exit}')
+    local dom="$1"
+    local myip
+    local resolved
+
+    myip=$(get_server_ip) || return 2
+
+    resolved=$(getent ahostsv4 "$dom" 2>/dev/null |
+        awk '{print $1}' |
+        sort -u |
+        head -n1)
+
     [ -z "$resolved" ] && return 2
+
     [ "$resolved" = "$myip" ] && return 0
+
     return 1
 }
 
