@@ -16,7 +16,17 @@ $APIKEY = '{API_KEY}';
 $adminnumber = '{admin_number}';
 $domainhosts = '{domain_name}';
 $usernamebot = '{username_bot}';
+$customEmojiFlag = getenv('CUSTOM_EMOJI_ENABLED');
+define('CUSTOM_EMOJI_ENABLED', $customEmojiFlag !== false ? filter_var($customEmojiFlag, FILTER_VALIDATE_BOOLEAN) : false);
 
+$customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
+define('CUSTOM_EMOJI_USAGE_TRACKING', $customEmojiUsageFlag !== false ? filter_var($customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN) : false);
+
+$appDebugFlag = getenv('APP_DEBUG');
+define('APP_DEBUG', $appDebugFlag !== false ? filter_var($appDebugFlag, FILTER_VALIDATE_BOOLEAN) : false);
+
+$configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
+define('MIRZA_MEMORY_LIMIT', preg_match('/^[1-9][0-9]*[KMG]$/i', $configuredMemoryLimit) ? strtoupper($configuredMemoryLimit) : '256M');
 // Global Custom Emoji feature flag. Disabled by default.
 // Enable with the CUSTOM_EMOJI_ENABLED=true environment variable or by
 // defining the constant before this file is loaded.
