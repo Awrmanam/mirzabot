@@ -3493,21 +3493,33 @@ $caption";
         ]);
     }
 } elseif ($text == "❌ حذف محصول" && $adminrulecheck['rule'] == "administrator") {
-    sendmessage($from_id, $textbotlang['Admin']['Product']['Rmove_location'], $json_list_marzban_panel, 'HTML');
-    step('selectloc', $from_id);
-} elseif ($user['step'] == "selectloc") {
-    update("user", "Processing_value", $text, "id", $from_id);
-    step('remove-product', $from_id);
-    sendmessage($from_id, $textbotlang['Admin']['Product']['selectRemoveProduct'], $json_list_product_list_admin, 'HTML');
-} elseif ($user['step'] == "remove-product") {
-    if (!in_array($text, $name_product)) {
+    $stmt = $pdo->prepare("SELECT id, name_product FROM product ORDER BY id");
+    $stmt->execute();
+    $deleteProducts = ['inline_keyboard' => []];
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $deleteProducts['inline_keyboard'][] = [[
+            'text' => "#{$row['id']} {$row['name_product']}",
+            'callback_data' => 'removeproduct_' . $row['id'],
+        ]];
+    }
+    $deleteProducts['inline_keyboard'][] = [[
+        'text' => $textbotlang['Admin']['backadmin'],
+        'callback_data' => 'backproductadmin',
+    ]];
+    sendmessage($from_id, $textbotlang['Admin']['Product']['selectRemoveProduct'], json_encode($deleteProducts), 'HTML');
+} elseif (preg_match('/^removeproduct_(\d+)$/', $datain, $dataget)) {
+    $idProduct = (int) $dataget[1];
+    try {
+        $stmt = $pdo->prepare("DELETE FROM product WHERE id = :id");
+        $deleted = $stmt->execute([':id' => $idProduct]) && $stmt->rowCount() === 1;
+    } catch (Throwable $exception) {
+        $deleted = false;
+        error_log('[product_consistency] delete_failed id=' . $idProduct . ' exception=' . get_class($exception));
+    }
+    if (!$deleted) {
         sendmessage($from_id, $textbotlang['users']['sell']['error-product'], null, 'HTML');
         return;
     }
-    $stmt = $pdo->prepare("DELETE FROM product WHERE name_product =:name_product AND (Location= :Location or Location= '/all')");
-    $stmt->bindParam(':name_product', $text, PDO::PARAM_STR);
-    $stmt->bindParam(':Location', $user['Processing_value'], PDO::PARAM_STR);
-    $stmt->execute();
     sendmessage($from_id, $textbotlang['Admin']['Product']['RemoveedProduct'], $shopkeyboard, 'HTML');
     step('home', $from_id);
 } elseif ($text == "✏️ ویرایش محصول" && $adminrulecheck['rule'] == "administrator") {

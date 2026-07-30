@@ -1440,18 +1440,27 @@ $keyboardlinkapp = json_encode([
     'resize_keyboard' => true
 ]);
 function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscustom = false,$backuser = "backuser", $valuetow = null,$customvolume = "customsellvolume"){
-    global $pdo,$textbotlang,$from_id;
+    global $pdo,$textbotlang,$from_id,$setting;
     $product = ['inline_keyboard' => []];
     $statusshowprice = select("shopSetting","*","Namevalue","statusshowprice","select")['value'];
     $stmt = $pdo->prepare($query);
     $stmt->execute();
+    $validCategories = null;
+    if (($setting['statuscategorygenral'] ?? '') == 'oncategorys') {
+        $validCategories = array_flip($pdo->query("SELECT remark FROM category")->fetchAll(PDO::FETCH_COLUMN));
+    }
     if($valuetow != null){
             $valuetow = "-$valuetow";
     }else{
             $valuetow = "";
         }
     while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        if ((string) $result['code_product'] === '' || ($validCategories !== null && !isset($validCategories[$result['category']]))) {
+            error_log('[product_consistency] hidden_unselectable_product id=' . (int) $result['id']);
+            continue;
+        }
         $hide_panel = json_decode($result['hide_panel'],true);
+        if (!is_array($hide_panel)) $hide_panel = [];
         if(in_array($location,$hide_panel))continue;
         $stmts2 = $pdo->prepare("SELECT * FROM invoice WHERE Status != 'Unpaid' AND id_user = '$from_id'");
         $stmts2->execute();
@@ -1465,8 +1474,11 @@ function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscu
         if($statusshowprice == "onshowprice"){
             $result['name_product'] = $namekeyboard;
         }
+        $callbackValue = strpos($datakeyboard, 'prodcutservice') === 0
+            ? 'pid-' . $result['id']
+            : $result['code_product'];
         $product['inline_keyboard'][] = [
-                ['text' =>  $result['name_product'], 'callback_data' => "{$datakeyboard}{$result['code_product']}{$valuetow}"]
+                ['text' =>  $result['name_product'], 'callback_data' => "{$datakeyboard}{$callbackValue}{$valuetow}"]
             ];
     }
     if ($statuscustom)$product['inline_keyboard'][] = [['text' => $textbotlang['users']['customsellvolume']['title'], 'callback_data' => $customvolume]];

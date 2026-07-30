@@ -4059,7 +4059,6 @@ $textinvite
     } else {
         $loc = $prodcut;
     }
-    update("user", "Processing_value_one", $loc, "id", $from_id);
     $eextraprice = json_decode($marzban_list_get['pricecustomvolume'], true);
     $custompricevalue = $eextraprice[$user['agent']];
     $eextraprice = json_decode($marzban_list_get['pricecustomtime'], true);
@@ -4072,8 +4071,23 @@ $textinvite
         $info_product['Service_time'] = $parts[1];
         $info_product['price_product'] = ($parts[2] * $custompricevalue) + ($parts[1] * $customtimevalueprice);
     } else {
-        $info_product = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM product WHERE code_product = '$loc' AND (Location = '{$userdate['name_panel']}'or Location = '/all') LIMIT 1"));
+        $lookupById = preg_match('/^pid-(\d+)$/', $loc, $productIdMatch);
+        $lookupField = $lookupById ? 'id' : 'code_product';
+        $lookupValue = $lookupById ? $productIdMatch[1] : $loc;
+        $stmt = $pdo->prepare("SELECT * FROM product WHERE $lookupField = :lookup AND (Location = :location OR Location = '/all') AND agent = :agent");
+        $stmt->execute([':lookup' => $lookupValue, ':location' => $userdate['name_panel'], ':agent' => $user['agent']]);
+        $productMatches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($productMatches) !== 1) {
+            $safeIds = implode(',', array_map('intval', array_column($productMatches, 'id')));
+            $stage = count($productMatches) > 1 ? 'ambiguous_product_code' : 'product_not_found';
+            error_log("[product_consistency] $stage ids=$safeIds lookup_hash=" . hash('sha256', (string) $lookupValue));
+            sendmessage($from_id, $textbotlang['users']['sell']['error-product'], null, 'HTML');
+            return;
+        }
+        $info_product = $productMatches[0];
+        $loc = $info_product['code_product'];
     }
+    update("user", "Processing_value_one", $loc, "id", $from_id);
     if (!isset($info_product['price_product'])) {
         sendmessage($from_id, "❌ خطایی در تایید  انجام شده است لطفا مراحل پرداخت را مجددا انجام دهید", $keyboard, 'HTML');
         return;
