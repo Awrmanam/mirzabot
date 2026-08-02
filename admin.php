@@ -822,6 +822,10 @@ $paycount
     deletemessage($from_id, $message_id);
     savedata("clear", "type", $typepanel);
 } elseif ($user['step'] == "add_name_panel") {
+    if (containsLiteralPremiumEmojiToken($text)) {
+        sendmessage($from_id, "❌ نام پنل باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+        return;
+    }
     if (in_array($text, $marzban_list)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
         return;
@@ -3214,6 +3218,10 @@ $caption";
     sendmessage($from_id, $textbotlang['Admin']['Product']['AddProductStepOne'], $backadmin, 'HTML');
     step('get_limit', $from_id);
 } elseif ($user['step'] == "get_limit") {
+    if (containsLiteralPremiumEmojiToken($text)) {
+        sendmessage($from_id, "❌ نام محصول باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+        return;
+    }
     if (strlen($text) > 150) {
         sendmessage($from_id, "❌ نام محصول باید کمتر از 150 کاراکتر باشد", $backadmin, 'HTML');
         return;
@@ -3232,22 +3240,37 @@ $caption";
         return;
     }
     savedata("save", "agent", $text);
-    sendmessage($from_id, $textbotlang['Admin']['Product']['Service_location'], $json_list_marzban_panel, 'HTML');
+    sendmessage(
+        $from_id,
+        $textbotlang['Admin']['Product']['Service_location'],
+        ProductPanelSelectionKeyboard('productpanel_'),
+        'HTML'
+    );
     step('get_location', $from_id);
 } elseif ($user['step'] == "get_location") {
-    $marzban_list[] = '/all';
-    if (!in_array($text, $marzban_list)) {
+    $selectedPanelIdentifier = trim((string) $text);
+    if (preg_match('/^productpanel_([A-Za-z0-9_-]{1,64})$/', $datain, $panelSelection)) {
+        $selectedPanelIdentifier = $panelSelection[1];
+    }
+    if ($selectedPanelIdentifier === 'all' || $selectedPanelIdentifier === '/all') {
+        $selectedPanelIdentifier = '/all';
+        $panel = null;
+        $locationValue = '/all';
+    } else {
+        $panel = resolvePanelByIdentifier($selectedPanelIdentifier);
+        $locationValue = $panel ? (string) $panel['code_panel'] : '';
+    }
+    if ($locationValue === '') {
         sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
         return;
     }
-    savedata("save", "Location", $text);
+    savedata("save", "Location", $locationValue);
     if ($setting['statuscategorygenral'] == "oncategorys") {
         sendmessage($from_id, "📌 نام دسته بندی خود را ارسال نمایید.", KeyboardCategoryadmin(), 'HTML');
         step("getcategory", $from_id);
         return;
     }
-    $panel = select("marzban_panel", "*", "name_panel", $text, "select");
-    if ($panel['type'] == "Manualsale") {
+    if ($panel && $panel['type'] == "Manualsale") {
         savedata("save", "Service_time", "0");
         savedata("save", "Volume_constraint", "0");
         sendmessage($from_id, $textbotlang['Admin']['Product']['GetPrice'], $backadmin, 'HTML');
@@ -3264,8 +3287,8 @@ $caption";
     }
     savedata("save", "category", $text);
     $userdata = json_decode($user['Processing_value'], true);
-    $panel = select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");
-    if ($panel['type'] == "Manualsale") {
+    $panel = resolvePanelByIdentifier($userdata['Location']);
+    if ($panel && $panel['type'] == "Manualsale") {
         savedata("save", "Service_time", "0");
         savedata("save", "Volume_constraint", "0");
         sendmessage($from_id, $textbotlang['Admin']['Product']['GetPrice'], $backadmin, 'HTML');
@@ -3297,8 +3320,8 @@ $caption";
     }
     savedata("save", "price_product", $text);
     $userdata = json_decode($user['Processing_value'], true);
-    $panel = select("marzban_panel", "*", "name_panel", $userdata['Location'], "select");
-    if ($panel['type'] == "marzban" || $panel['type'] == "marzneshin") {
+    $panel = resolvePanelByIdentifier($userdata['Location']);
+    if ($panel && ($panel['type'] == "marzban" || $panel['type'] == "marzneshin")) {
         sendmessage($from_id, $textbotlang['Admin']['Product']['gettimereset'], $keyboardtimereset, 'HTML');
         step('getnote', $from_id);
         return;
@@ -3312,6 +3335,19 @@ $caption";
     step('endstep', $from_id);
 } elseif ($user['step'] == "endstep") {
     $userdata = json_decode($user['Processing_value'], true);
+    if (containsLiteralPremiumEmojiToken($userdata['name_product'] ?? '')) {
+        sendmessage($from_id, "❌ نام محصول شامل توکن ایموجی است و ذخیره نشد.", $backadmin, 'HTML');
+        return;
+    }
+    if (($userdata['Location'] ?? '') !== '/all') {
+        $selectedPanel = resolvePanelByIdentifier($userdata['Location'] ?? '');
+        if (!$selectedPanel) {
+            sendmessage($from_id, "❌ پنل انتخابی دیگر معتبر نیست؛ محصول ذخیره نشد.", $shopkeyboard, 'HTML');
+            step('home', $from_id);
+            return;
+        }
+        $userdata['Location'] = (string) $selectedPanel['code_panel'];
+    }
     $randomString = bin2hex(random_bytes(2));
     $varhide_panel = "{}";
     if (!isset($userdata['category']))
@@ -3492,21 +3528,71 @@ $caption";
         ]);
     }
 } elseif ($text == "❌ حذف محصول" && $adminrulecheck['rule'] == "administrator") {
-    sendmessage($from_id, $textbotlang['Admin']['Product']['Rmove_location'], $json_list_marzban_panel, 'HTML');
+    sendmessage(
+        $from_id,
+        $textbotlang['Admin']['Product']['Rmove_location'],
+        ProductPanelSelectionKeyboard('productdeletepanel_'),
+        'HTML'
+    );
     step('selectloc', $from_id);
 } elseif ($user['step'] == "selectloc") {
-    update("user", "Processing_value", $text, "id", $from_id);
+    $selectedPanelIdentifier = trim((string) $text);
+    if (preg_match('/^productdeletepanel_([A-Za-z0-9_-]{1,64})$/', $datain, $panelSelection)) {
+        $selectedPanelIdentifier = $panelSelection[1];
+    }
+    if ($selectedPanelIdentifier === 'all' || $selectedPanelIdentifier === '/all') {
+        $location = productPanelLocationValues('/all');
+    } else {
+        $panel = resolvePanelByIdentifier($selectedPanelIdentifier);
+        if (!$panel) {
+            sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
+            return;
+        }
+        $location = productPanelLocationValues($panel['code_panel']);
+    }
+    update("user", "Processing_value", $location['code_panel'], "id", $from_id);
+    $stmt = $pdo->prepare("SELECT id, name_product FROM product
+        WHERE (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+        ORDER BY id");
+    $stmt->execute([
+        'panel_code' => $location['code_panel'],
+        'panel_name' => $location['name_panel'],
+    ]);
+    $productDeleteKeyboard = ['inline_keyboard' => []];
+    while ($product = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $productDeleteKeyboard['inline_keyboard'][] = [[
+            'text' => $product['name_product'],
+            'callback_data' => 'productdelete_' . $product['id'],
+        ]];
+    }
+    $productDeleteKeyboard['inline_keyboard'][] = [[
+        'text' => '▶️ بازگشت',
+        'callback_data' => 'admin',
+    ]];
     step('remove-product', $from_id);
-    sendmessage($from_id, $textbotlang['Admin']['Product']['selectRemoveProduct'], $json_list_product_list_admin, 'HTML');
+    sendmessage(
+        $from_id,
+        $textbotlang['Admin']['Product']['selectRemoveProduct'],
+        json_encode($productDeleteKeyboard, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        'HTML'
+    );
 } elseif ($user['step'] == "remove-product") {
-    if (!in_array($text, $name_product)) {
+    if (!preg_match('/^productdelete_([0-9]+)$/', $datain, $productSelection)) {
         sendmessage($from_id, $textbotlang['users']['sell']['error-product'], null, 'HTML');
         return;
     }
-    $stmt = $pdo->prepare("DELETE FROM product WHERE name_product =:name_product AND (Location= :Location or Location= '/all')");
-    $stmt->bindParam(':name_product', $text, PDO::PARAM_STR);
-    $stmt->bindParam(':Location', $user['Processing_value'], PDO::PARAM_STR);
+    $location = productPanelLocationValues($user['Processing_value']);
+    $stmt = $pdo->prepare("DELETE FROM product WHERE id = :product_id
+        AND (Location = :panel_code OR Location = :panel_name OR Location = '/all')");
+    $stmt->bindValue(':product_id', (int) $productSelection[1], PDO::PARAM_INT);
+    $stmt->bindValue(':panel_code', $location['code_panel'], PDO::PARAM_STR);
+    $stmt->bindValue(':panel_name', $location['name_panel'], PDO::PARAM_STR);
     $stmt->execute();
+    if ($stmt->rowCount() !== 1) {
+        sendmessage($from_id, "❌ محصول حذف نشد؛ انتخاب نامعتبر یا قدیمی است.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     sendmessage($from_id, $textbotlang['Admin']['Product']['RemoveedProduct'], $shopkeyboard, 'HTML');
     step('home', $from_id);
 } elseif ($text == "✏️ ویرایش محصول" && $adminrulecheck['rule'] == "administrator") {
@@ -3534,13 +3620,20 @@ $caption";
     $typeagent = $dataget[1];
     update("user", "Processing_value_tow", $typeagent, "id", $from_id);
     $product = [];
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $getdataproduct = mysqli_query($connect, "SELECT * FROM product WHERE (Location = '{$panel['name_panel']}' or Location = '/all') AND agent = '$typeagent'");
+    $location = productPanelLocationValues($user['Processing_value_one']);
+    $stmt = $pdo->prepare("SELECT * FROM product
+        WHERE (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+          AND agent = :agent ORDER BY id");
+    $stmt->execute([
+        'panel_code' => $location['code_panel'],
+        'panel_name' => $location['name_panel'],
+        'agent' => $typeagent,
+    ]);
     $list_product = [
         'inline_keyboard' => [],
     ];
-    if (isset($getdataproduct)) {
-        while ($row = mysqli_fetch_assoc($getdataproduct)) {
+    if ($stmt) {
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $list_product['inline_keyboard'][] = [
                 ['text' => $row['name_product'], 'callback_data' => "productedit_" . $row['id']]
             ];
@@ -3556,15 +3649,35 @@ $caption";
     $id_product = $dataget[1];
     deletemessage($from_id, $message_id);
     update("user", "Processing_value", $id_product, "id", $from_id);
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $info_product = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM product WHERE id = '$id_product'  AND agent = '{$user['Processing_value_tow']}' AND (Location = '{$panel['name_panel']}' OR Location = '/all') LIMIT 1"));
+    $location = productPanelLocationValues($user['Processing_value_one']);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE id = :product_id AND agent = :agent
+        AND (Location = :panel_code OR Location = :panel_name OR Location = '/all') LIMIT 1");
+    $stmt->execute([
+        'product_id' => $id_product,
+        'agent' => $user['Processing_value_tow'],
+        'panel_code' => $location['code_panel'],
+        'panel_name' => $location['name_panel'],
+    ]);
+    $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$info_product) {
+        sendmessage($from_id, "❌ محصول انتخابی دیگر در این پنل وجود ندارد.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     $count_invoice = select("invoice", "*", "name_product", $info_product['name_product'], "count");
+    $displayProductLocation = $info_product['Location'];
+    if ($displayProductLocation !== '/all') {
+        $displayPanel = resolvePanelByIdentifier($displayProductLocation);
+        if ($displayPanel) {
+            $displayProductLocation = normalizePanelLookupLabel($displayPanel['name_panel']);
+        }
+    }
     $infoproduct = "
 📌 اطلاعات محصول در حال ویرایش:
 نام محصول :  {$info_product['name_product']}
 قیمت محصول : {$info_product['price_product']}
 حجم محصول : {$info_product['Volume_constraint']}
-موقعیت محصول : {$info_product['Location']}
+موقعیت محصول : {$displayProductLocation}
 زمان محصول : {$info_product['Service_time']}
 نوع کاربری محصول : {$info_product['agent']}
 ریست دوره ای حجم محصول : {$info_product['data_limit_reset']}
@@ -3582,12 +3695,9 @@ $caption";
         sendmessage($from_id, $textbotlang['Admin']['Product']['InvalidPrice'], $backadmin, 'HTML');
         return;
     }
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET price_product = :price_product WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET price_product = :price_product WHERE id = :product_id");
     $stmt->bindParam(':price_product', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅ قیمت محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -3595,12 +3705,9 @@ $caption";
     sendmessage($from_id, "یادداشت جدید را ارسال کنید", $backadmin, 'HTML');
     step('change_note', $from_id);
 } elseif ($user['step'] == "change_note") {
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET note = :notes WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET note = :notes WHERE id = :product_id");
     $stmt->bindParam(':notes', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅ یادداشت محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -3613,12 +3720,9 @@ $caption";
         sendmessage($from_id, "❌ دسته بندی انتخاب شده وجود ندارد از بخش پلن ها > اضافه کردن دسته بندی ُ دسته بندی خود را اضافه کنید سپس محصول را اضافه نمایید.", KeyboardCategoryadmin(), 'HTML');
         return;
     }
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET category = :categroy WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET category = :categroy WHERE id = :product_id");
     $stmt->bindParam(':categroy', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅ دسته بندی محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -3626,6 +3730,10 @@ $caption";
     sendmessage($from_id, "نام جدید را ارسال کنید", $backadmin, 'HTML');
     step('change_name', $from_id);
 } elseif ($user['step'] == "change_name") {
+    if (containsLiteralPremiumEmojiToken($text)) {
+        sendmessage($from_id, "❌ نام محصول باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+        return;
+    }
     if (strlen($text) > 150) {
         sendmessage($from_id, "❌ نام محصول باید کمتر از 150 کاراکتر باشد", $backadmin, 'HTML');
         return;
@@ -3634,12 +3742,9 @@ $caption";
         sendmessage($from_id, "❌ محصول با نام $text وجود دارد", $backadmin, 'HTML');
         return;
     }
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET name_product = :name_products WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET name_product = :name_products WHERE id = :product_id");
     $stmt->bindParam(':name_products', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅نام محصول بروزرسانی شد", $change_product, 'HTML');
     step('home', $from_id);
@@ -3652,12 +3757,9 @@ $caption";
         sendmessage($from_id, "❌ گروه کاربری نامعتبر می باشد", null, 'HTML');
         return;
     }
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET agent = :agents WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET agent = :agents WHERE id = :product_id");
     $stmt->bindParam(':agents', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅نام محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -3665,35 +3767,49 @@ $caption";
     sendmessage($from_id, "نوع ریست حجم را ارسال کنید", $keyboardtimereset, 'HTML');
     step('change_reset_data', $from_id);
 } elseif ($user['step'] == "change_reset_data") {
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET data_limit_reset = :data_limit_reset WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET data_limit_reset = :data_limit_reset WHERE id = :product_id");
     $stmt->bindParam(':data_limit_reset', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅نام محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
 } elseif ($text == "موقعیت محصول" && $adminrulecheck['rule'] == "administrator") {
-    sendmessage($from_id, "📌 موقعیت جدید محصول را انتخاب کنید", $json_list_marzban_panel, 'HTML');
+    sendmessage(
+        $from_id,
+        "📌 موقعیت جدید محصول را انتخاب کنید",
+        ProductPanelSelectionKeyboard('productmove_', false),
+        'HTML'
+    );
     step('change_loc_data', $from_id);
 } elseif ($user['step'] == "change_loc_data") {
-    if ($text == "/all") {
+    $newPanelIdentifier = trim((string) $text);
+    if (preg_match('/^productmove_([A-Za-z0-9_-]{1,64})$/', $datain, $panelSelection)) {
+        $newPanelIdentifier = $panelSelection[1];
+    }
+    if ($newPanelIdentifier === '/all' || $newPanelIdentifier === 'all') {
         sendmessage($from_id, "❌ نمی توانید محصول تعریف شده را به نام موقعیت /all تغییر دهید.", $shopkeyboard, 'HTML');
         return;
     }
-    $product = select("product", "*", "name_product", $user['Processing_value']);
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET Location = :Location2 WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
-    $stmt->bindParam(':Location2', $text);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $newPanel = resolvePanelByIdentifier($newPanelIdentifier);
+    if (!$newPanel) {
+        sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
+        return;
+    }
+    $product = select("product", "*", "id", $user['Processing_value'], "select", ['cache' => false]);
+    if (!$product) {
+        sendmessage($from_id, "❌ محصول انتخابی دیگر وجود ندارد.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    $oldLocation = productPanelLocationValues($product['Location']);
+    $stmt = $pdo->prepare("UPDATE product SET Location = :new_panel_code WHERE id = :product_id");
+    $stmt->bindValue(':new_panel_code', $newPanel['code_panel'], PDO::PARAM_STR);
+    $stmt->bindValue(':product_id', (int) $user['Processing_value'], PDO::PARAM_INT);
     $stmt->execute();
     $stmt = $pdo->prepare("UPDATE invoice SET Service_location = :Service_location WHERE name_product = :name_product AND Service_location = :Location ");
-    $stmt->bindParam(':Service_location', $text);
+    $stmt->bindValue(':Service_location', $newPanel['name_panel'], PDO::PARAM_STR);
     $stmt->bindParam(':name_product', $product['name_product']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
+    $stmt->bindValue(':Location', $oldLocation['name_panel'], PDO::PARAM_STR);
     $stmt->execute();
     sendmessage($from_id, "✅موقعیت محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -3706,12 +3822,9 @@ $caption";
         return;
     }
     $product = select("product", "*", "id", $user['Processing_value']);
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one']);
-    $stmt = $pdo->prepare("UPDATE product SET Volume_constraint = :Volume_constraint WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET Volume_constraint = :Volume_constraint WHERE id = :product_id");
     $stmt->bindParam(':Volume_constraint', $text);
-    $stmt->bindParam(':name_product', $product['id']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $product['id']);
     $stmt->execute();
     sendmessage($from_id, $textbotlang['Admin']['Product']['volumeUpdated'], $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -3723,12 +3836,9 @@ $caption";
         sendmessage($from_id, $textbotlang['Admin']['Product']['InvalidTime'], $backadmin, 'HTML');
         return;
     }
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET Service_time = :Service_time WHERE id = :id_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET Service_time = :Service_time WHERE id = :id_product");
     $stmt->bindParam(':Service_time', $text);
     $stmt->bindParam(':id_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
     $stmt->execute();
     sendmessage($from_id, $textbotlang['Admin']['Product']['TimeUpdated'], $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -4456,6 +4566,10 @@ $text_expie_agent
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['GetNameNew'], $backadmin, 'HTML');
     step('GetNameNew', $from_id);
 } elseif ($user['step'] == "GetNameNew") {
+    if (containsLiteralPremiumEmojiToken($text)) {
+        sendmessage($from_id, "❌ نام پنل باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+        return;
+    }
     if (in_array($text, $marzban_list)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
         return;
@@ -4465,7 +4579,6 @@ $text_expie_agent
     update("user", "Processing_value", $text, "id", $from_id);
     update("marzban_panel", "name_panel", $text, "name_panel", $user['Processing_value']);
     update("invoice", "Service_location", $text, "Service_location", $user['Processing_value']);
-    update("product", "Location", $text, "Location", $user['Processing_value']);
     update("user", "Processing_value", $text, "id", $from_id);
     step('home', $from_id);
 } elseif ($text == "🔗 ویرایش آدرس پنل" && $adminrulecheck['rule'] == "administrator") {
@@ -7002,10 +7115,13 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     sendmessage($from_id, $textbotlang['Admin']['addorder']['fourstep'], $json_list_product_list_admin, 'HTML');
     step('stependforaddorder', $from_id);
 } elseif ($user['step'] == "stependforaddorder") {
-    $sql = "SELECT * FROM product  WHERE name_product = :name_product AND (Location = :location OR Location = '/all') LIMIT 1";
+    $productLocation = productPanelLocationValues($user['Processing_value_tow']);
+    $sql = "SELECT * FROM product WHERE name_product = :name_product AND
+        (Location = :panel_code OR Location = :panel_name OR Location = '/all') LIMIT 1";
     $stmt = $pdo->prepare($sql);
     $stmt->bindParam(':name_product', $text, PDO::PARAM_STR);
-    $stmt->bindParam(':location', $user['Processing_value_tow'], PDO::PARAM_STR);
+    $stmt->bindParam(':panel_code', $productLocation['code_panel'], PDO::PARAM_STR);
+    $stmt->bindParam(':panel_name', $productLocation['name_panel'], PDO::PARAM_STR);
     $stmt->execute();
     $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $user['Processing_value_tow'], "select");
@@ -8294,9 +8410,13 @@ n2", $backadmin, 'HTML');
     $userdata = json_decode($user['Processing_value'], true);
     $product = [];
     savedata("save", "namerecord", $text);
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE Location = :text or Location = '/all' ");
-    $stmt->bindParam(':text', $userdata['namepanel'], PDO::PARAM_STR);
-    $stmt->execute();
+    $productLocation = productPanelLocationValues($userdata['namepanel']);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE
+        Location = :panel_code OR Location = :panel_name OR Location = '/all'");
+    $stmt->execute([
+        'panel_code' => $productLocation['code_panel'],
+        'panel_name' => $productLocation['name_panel'],
+    ]);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $product[] = [$row['name_product']];
     }
@@ -8582,9 +8702,14 @@ n2", $backadmin, 'HTML');
 در صورتی که  موقع تعریف محصول /all زدید  اگر میخواید این دسته تغییر قیمت داشته باشد حتما باید /all ارسال شود", $json_list_marzban_panel, 'HTML');
     step("getaddpricepeoductloc", $from_id);
 } elseif ($user['step'] == "getaddpricepeoductloc") {
-    sendmessage($from_id, "📌 قیمت برای کدام گروه کاربری اعمال شود 
+    $panel = $text === '/all' ? null : resolvePanelByIdentifier($text);
+    if ($text !== '/all' && !$panel) {
+        sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
+        return;
+    }
+    sendmessage($from_id, "📌 قیمت برای کدام گروه کاربری اعمال شود
 f,n.n2", $backadmin, 'HTML');
-    savedata("clear", "namepanel", $text);
+    savedata("clear", "namepanel", $panel ? $panel['code_panel'] : '/all');
     step("getagentaddpriceproduct", $from_id);
 } elseif ($user['step'] == "getagentaddpriceproduct") {
     $keyboard_type_price = json_encode([
@@ -8614,7 +8739,9 @@ f,n.n2", $backadmin, 'HTML');
         return;
     }
     $userdata = json_decode($user['Processing_value'], true);
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE Location = '{$userdata['namepanel']}' AND agent = '{$userdata['agent']}'");
+    $productLocationCondition = productLocationSqlCondition($userdata['namepanel'], 'Location', false);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE {$productLocationCondition} AND agent = :agent");
+    $stmt->bindValue(':agent', $userdata['agent'], PDO::PARAM_STR);
     $stmt->execute();
     $product = $stmt->fetchAll();
     if ($product == false) {
@@ -8623,12 +8750,13 @@ f,n.n2", $backadmin, 'HTML');
         return;
     }
     if ($userdata['type_price'] == "static") {
-        $stmt = $pdo->prepare("UPDATE  product set price_product = price_product + :price WHERE Location = '{$userdata['namepanel']}' AND agent = '{$userdata['agent']}'");
+        $stmt = $pdo->prepare("UPDATE product SET price_product = price_product + :price WHERE {$productLocationCondition} AND agent = :agent");
         $stmt->bindParam(':price', $text, PDO::PARAM_STR);
     } else {
-        $stmt = $pdo->prepare("UPDATE  product set price_product = price_product + (price_product * :price / 100)  WHERE Location = '{$userdata['namepanel']}' AND agent = '{$userdata['agent']}'");
+        $stmt = $pdo->prepare("UPDATE product SET price_product = price_product + (price_product * :price / 100) WHERE {$productLocationCondition} AND agent = :agent");
         $stmt->bindParam(':price', $text, PDO::PARAM_STR);
     }
+    $stmt->bindValue(':agent', $userdata['agent'], PDO::PARAM_STR);
     $stmt->execute();
     sendmessage($from_id, "✅ مبلغ با موفقیت برای تمامی محصولات اعمال شد", $shopkeyboard, 'HTML');
     step("home", $from_id);
@@ -8637,9 +8765,14 @@ f,n.n2", $backadmin, 'HTML');
 در صورتی که  موقع تعریف محصول /all زدید  اگر میخواید این دسته تغییر قیمت داشته باشد حتما باید /all ارسال شود", $json_list_marzban_panel, 'HTML');
     step("getlowpricepeoductloc", $from_id);
 } elseif ($user['step'] == "getlowpricepeoductloc") {
-    sendmessage($from_id, "📌 قیمت برای کدام گروه کاربری اعمال شود 
+    $panel = $text === '/all' ? null : resolvePanelByIdentifier($text);
+    if ($text !== '/all' && !$panel) {
+        sendmessage($from_id, "❌ پنل انتخابی اشتباه است", null, 'HTML');
+        return;
+    }
+    sendmessage($from_id, "📌 قیمت برای کدام گروه کاربری اعمال شود
 f,n.n2", $backadmin, 'HTML');
-    savedata("clear", "namepanel", $text);
+    savedata("clear", "namepanel", $panel ? $panel['code_panel'] : '/all');
     step("getkampricepeoductloc", $from_id);
 } elseif ($user['step'] == "getkampricepeoductloc") {
     sendmessage($from_id, "📌 مبلغی که میخواهید اعمال شود را ارسال نمایید", $backadmin, 'HTML');
@@ -8651,7 +8784,9 @@ f,n.n2", $backadmin, 'HTML');
         return;
     }
     $userdata = json_decode($user['Processing_value'], true);
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE Location = '{$userdata['namepanel']}' AND agent = '{$userdata['agent']}'");
+    $productLocationCondition = productLocationSqlCondition($userdata['namepanel'], 'Location', false);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE {$productLocationCondition} AND agent = :agent");
+    $stmt->bindValue(':agent', $userdata['agent'], PDO::PARAM_STR);
     $stmt->execute();
     $product = $stmt->fetchAll();
     if ($product == false) {
@@ -9860,12 +9995,10 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
                 $DataUserOut['proxies'][$key] = new stdClass();
             }
         }
-        $stmt = $pdo->prepare("UPDATE product SET proxies = :proxies WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+        $stmt = $pdo->prepare("UPDATE product SET proxies = :proxies WHERE id = :product_id");
         $proxies_json = json_encode($DataUserOut['proxies']);
         $stmt->bindParam(':proxies', $proxies_json);
-        $stmt->bindParam(':name_product', $user['Processing_value']);
-        $stmt->bindParam(':Location', $marzban_list_get['name_panel']);
-        $stmt->bindParam(':agent', $user['Processing_value_tow']);
+        $stmt->bindParam(':product_id', $user['Processing_value']);
         $stmt->execute();
         $datainbound = json_encode($DataUserOut['inbounds']);
     } elseif ($marzban_list_get['type'] == "marzneshin") {
@@ -9894,11 +10027,9 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
         sendmessage($from_id, "❌ برای این پنل قابلیت تعریف اینباند وجود ندارد", $shopkeyboard, 'HTML');
         return;
     }
-    $stmt = $pdo->prepare("UPDATE product SET inbounds = :inbounds WHERE id = :name_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET inbounds = :inbounds WHERE id = :product_id");
     $stmt->bindParam(':inbounds', $datainbound);
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $marzban_list_get['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     sendmessage($from_id, "✅محصول بروزرسانی شد", $shopkeyboard, 'HTML');
     step('home', $from_id);
@@ -11803,11 +11934,8 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, "✅ زمان با موفقیت ثبت گردید.", $CartManage, 'HTML');
     step("home", $from_id);
 } elseif ($text == "نمایش برای خرید اول") {
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE id = :name_product  AND agent = :agent AND (Location = :Location OR Location = '/all') LIMIT 1");
-    $stmt->bindParam(':name_product', $user['Processing_value']);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE id = :product_id LIMIT 1");
+    $stmt->bindParam(':product_id', $user['Processing_value']);
     $stmt->execute();
     $product = $stmt->fetch(PDO::FETCH_ASSOC);
     $status_name = [
@@ -11817,30 +11945,25 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $Response = json_encode([
         'inline_keyboard' => [
             [
-                ['text' => $status_name, 'callback_data' => 'status_on_buy-' . $product['code_product'] . "-" . $product['one_buy_status']],
+                ['text' => $status_name, 'callback_data' => 'status_on_buy-' . $product['id'] . "-" . $product['one_buy_status']],
             ],
         ]
     ]);
     sendmessage($from_id, "📌 از طریق این قابلیت می توانید تعیین کنید این محصول برای خرید اول باشد یا خیر", $Response, 'HTML');
 } elseif (preg_match('/status_on_buy-(.*)-(.*)/', $datain, $dataget)) {
-    $code_product = $dataget[1];
+    $product_id = $dataget[1];
     $status_now = $dataget[2];
     if ($status_now == '0') {
         $status_now = '1';
     } else {
         $status_now = '0';
     }
-    $panel = select("marzban_panel", "*", "code_panel", $user['Processing_value_one'], "select");
-    $stmt = $pdo->prepare("UPDATE product SET one_buy_status = :one_buy_status WHERE code_product = :code_product AND (Location = :Location OR Location = '/all') AND agent = :agent");
+    $stmt = $pdo->prepare("UPDATE product SET one_buy_status = :one_buy_status WHERE id = :product_id");
     $stmt->bindParam(':one_buy_status', $status_now);
-    $stmt->bindParam(':code_product', $code_product);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt->bindParam(':product_id', $product_id);
     $stmt->execute();
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE code_product = :code_product  AND agent = :agent AND (Location = :Location OR Location = '/all') LIMIT 1");
-    $stmt->bindParam(':code_product', $code_product);
-    $stmt->bindParam(':Location', $panel['name_panel']);
-    $stmt->bindParam(':agent', $user['Processing_value_tow']);
+    $stmt = $pdo->prepare("SELECT * FROM product WHERE id = :product_id LIMIT 1");
+    $stmt->bindParam(':product_id', $product_id);
     $stmt->execute();
     $product = $stmt->fetch(PDO::FETCH_ASSOC);
     $status_name = [
@@ -11850,7 +11973,7 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $Response = json_encode([
         'inline_keyboard' => [
             [
-                ['text' => $status_name, 'callback_data' => 'status_on_buy-' . $product['code_product'] . "-" . $product['one_buy_status']],
+                ['text' => $status_name, 'callback_data' => 'status_on_buy-' . $product['id'] . "-" . $product['one_buy_status']],
             ],
         ]
     ]);

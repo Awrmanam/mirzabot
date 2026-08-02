@@ -41,9 +41,12 @@ class ManagePanel
             $inoice = false;
         }
         if (!in_array($code_product, ["usertest", "🛍 حجم دلخواه", "customvolume"])) {
-
-            $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = :name_panel OR Location = '/all')  AND code_product = :code_product");
-            $stmt->bindParam(':name_panel', $name_panel);
+            $productLocation = productPanelLocationValues($Get_Data_Panel['code_panel']);
+            $stmt = $pdo->prepare("SELECT * FROM product WHERE
+                (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+                AND code_product = :code_product");
+            $stmt->bindParam(':panel_code', $productLocation['code_panel']);
+            $stmt->bindParam(':panel_name', $productLocation['name_panel']);
             $stmt->bindParam(':code_product', $code_product);
             $stmt->execute();
             $Get_Data_Product = $stmt->fetch(PDO::FETCH_ASSOC);

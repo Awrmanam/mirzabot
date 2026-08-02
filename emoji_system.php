@@ -921,6 +921,47 @@ function styledButtonIconKeyForText($buttonText)
     return $GLOBALS['styled_runtime_button_icon_map'][$buttonText] ?? '';
 }
 
+function styledButtonIconKeyForSource($sourceType, $sourceKey)
+{
+    global $pdo;
+
+    if (!styledSystemReady()) {
+        return '';
+    }
+
+    $sourceType = trim((string) $sourceType);
+    $sourceKey = trim((string) $sourceKey);
+    if ($sourceType === '' || $sourceKey === '') {
+        return '';
+    }
+
+    $cacheKey = $sourceType . ':' . $sourceKey;
+    if (isset($GLOBALS['styled_runtime_source_icon_map'][$cacheKey])) {
+        return $GLOBALS['styled_runtime_source_icon_map'][$cacheKey];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT icon_emoji_key FROM styled_button_icons
+            WHERE source_type = ? AND source_key = ? LIMIT 1");
+        $stmt->execute([$sourceType, $sourceKey]);
+        $iconKey = trim((string) $stmt->fetchColumn());
+    } catch (Throwable $e) {
+        styledLog('button_icon_query_failed', '', $sourceType, $e->getMessage());
+        $iconKey = '';
+    }
+
+    $GLOBALS['styled_runtime_source_icon_map'][$cacheKey] = $iconKey;
+    return $iconKey;
+}
+
+function buildStyledPanelButton(array $panel, array $action)
+{
+    $codePanel = (string) ($panel['code_panel'] ?? '');
+    $namePanel = normalizePanelLookupLabel($panel['name_panel'] ?? '');
+    $iconKey = styledButtonIconKeyForSource('marzban_panel', $codePanel);
+    return buildStyledButton($namePanel, $action, $iconKey);
+}
+
 function buildStyledButton($text, array $action, $iconEmojiKey = '')
 {
     $button = array_merge(['text' => (string) $text], $action);

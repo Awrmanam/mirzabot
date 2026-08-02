@@ -1,6 +1,7 @@
 <?php
 require_once 'vendor/autoload.php';
 require 'config.php';
+require_once __DIR__ . '/product_panel_identity.php';
 require 'vendor/autoload.php';
 ini_set('error_log', 'error_log');
 
@@ -515,6 +516,7 @@ function select($table, $field, $whereField = null, $whereValue = null, $type = 
     return $result;
 }
 
+
 function getPaySettingValue($name, $default = null)
 {
     $result = select("PaySetting", "ValuePay", "NamePay", $name, "select");
@@ -787,9 +789,12 @@ function DirectPayment($order_id, $image = 'images.jpg')
     update("user", "Processing_value_four", "0", "id", $Balance_id['id']);
     if ($steppay[0] == "getconfigafterpay") {
         $get_invoice = select("invoice", "*", "username", $steppay[1], "select");
-        $stmt = $pdo->prepare("SELECT * FROM product WHERE name_product = :name_product AND (Location = :Service_location  or Location = '/all')");
+        $invoiceProductLocation = productPanelLocationValues($get_invoice['Service_location']);
+        $stmt = $pdo->prepare("SELECT * FROM product WHERE name_product = :name_product AND
+            (Location = :panel_code OR Location = :panel_name OR Location = '/all')");
         $stmt->bindParam(':name_product', $get_invoice['name_product'], PDO::PARAM_STR);
-        $stmt->bindParam(':Service_location', $get_invoice['Service_location'], PDO::PARAM_STR);
+        $stmt->bindParam(':panel_code', $invoiceProductLocation['code_panel'], PDO::PARAM_STR);
+        $stmt->bindParam(':panel_name', $invoiceProductLocation['name_panel'], PDO::PARAM_STR);
         $stmt->execute();
         $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($get_invoice['name_product'] == "🛍 حجم دلخواه" || $get_invoice['name_product'] == "⚙️ سرویس دلخواه") {
@@ -800,9 +805,11 @@ function DirectPayment($order_id, $image = 'images.jpg')
             $info_product['Service_time'] = $get_invoice['Service_time'];
             $info_product['price_product'] = $get_invoice['price_product'];
         } else {
-            $stmt = $pdo->prepare("SELECT * FROM product WHERE name_product = :name_product AND (Location = :Service_location  or Location = '/all')");
+            $stmt = $pdo->prepare("SELECT * FROM product WHERE name_product = :name_product AND
+                (Location = :panel_code OR Location = :panel_name OR Location = '/all')");
             $stmt->bindParam(':name_product', $get_invoice['name_product'], PDO::PARAM_STR);
-            $stmt->bindParam(':Service_location', $get_invoice['Service_location'], PDO::PARAM_STR);
+            $stmt->bindParam(':panel_code', $invoiceProductLocation['code_panel'], PDO::PARAM_STR);
+            $stmt->bindParam(':panel_name', $invoiceProductLocation['name_panel'], PDO::PARAM_STR);
             $stmt->execute();
             $info_product = $stmt->fetch(PDO::FETCH_ASSOC);
         }
@@ -1065,8 +1072,16 @@ $textonebuy
             $prodcut['Service_time'] = $service_other['Service_time'];
             $prodcut['Volume_constraint'] = $service_other['volumebuy'];
         } else {
-            $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = '{$nameloc['Service_location']}' OR Location = '/all') AND agent= '{$Balance_id['agent']}' AND code_product = '$codeproduct'");
-            $stmt->execute();
+            $productLocation = productPanelLocationValues($nameloc['Service_location']);
+            $stmt = $pdo->prepare("SELECT * FROM product WHERE
+                (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+                AND agent = :agent AND code_product = :code_product");
+            $stmt->execute([
+                'panel_code' => $productLocation['code_panel'],
+                'panel_name' => $productLocation['name_panel'],
+                'agent' => $Balance_id['agent'],
+                'code_product' => $codeproduct,
+            ]);
             $prodcut = $stmt->fetch(PDO::FETCH_ASSOC);
         }
         if ($nameloc['name_product'] == "سرویس تست") {

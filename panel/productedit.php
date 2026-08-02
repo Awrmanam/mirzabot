@@ -20,8 +20,14 @@ if($product == false){
 }else{
 if($_GET['action'] == "save"){
     $name_product = htmlspecialchars($_POST['name_product'], ENT_QUOTES, 'UTF-8');
+    if (containsLiteralPremiumEmojiToken($name_product)) {
+        $statusmessage = true;
+        $infomesssage = "نام محصول باید متن ساده باشد؛ ایموجی پریمیوم را از بخش شخصی‌سازی تنظیم کنید.";
+    }
     $prodcutcheck = select("product","*","name_product",$name_product,"count");
-    if($prodcutcheck != 0){
+    if (containsLiteralPremiumEmojiToken($name_product)) {
+        // The validation message above is preserved and no business value is updated.
+    } elseif($prodcutcheck != 0){
         $statusmessage = true;
         $infomesssage ="نام محصول وجود دارد.";
     }else{

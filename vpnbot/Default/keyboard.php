@@ -215,8 +215,12 @@ function KeyboardCategory($location, $agent, $backuser = "backuser")
     $stmt->execute();
     $list_category = ['inline_keyboard' => [],];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category AND agent = :agent");
-        $stmts->bindParam(':location', $location, PDO::PARAM_STR);
+        $productLocation = productPanelLocationValues($location);
+        $stmts = $pdo->prepare("SELECT * FROM product WHERE
+            (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+            AND category = :category AND agent = :agent");
+        $stmts->bindParam(':panel_code', $productLocation['code_panel'], PDO::PARAM_STR);
+        $stmts->bindParam(':panel_name', $productLocation['name_panel'], PDO::PARAM_STR);
         $stmts->bindParam(':category', $row['remark'], PDO::PARAM_STR);
         $stmts->bindParam(':agent', $agent);
         $stmts->execute();

@@ -18,6 +18,10 @@ if( !isset($_SESSION["user"]) || !$result ){
 }
 $nameProduct = $_POST['nameproduct'] ?? null;
 if(!empty($nameProduct)){
+    if (containsLiteralPremiumEmojiToken($nameProduct)) {
+        echo "alert(\"نام محصول باید متن ساده باشد؛ ایموجی پریمیوم را از بخش شخصی‌سازی تنظیم کنید\")";
+        return;
+    }
     $randomString = bin2hex(random_bytes(2));
     $userdata['data_limit_reset'] = "no_reset";
     $product = select("product","*","name_product",$nameProduct,"count");
@@ -25,6 +29,13 @@ if(!empty($nameProduct)){
         echo "alert(\"محصول از قبل وجود دارد\")";
         return;
     }
+    $requestedLocation = $_POST['namepanel'] ?? '';
+    $panel = $requestedLocation === '/all' ? null : resolvePanelByIdentifier($requestedLocation);
+    if ($requestedLocation !== '/all' && !$panel) {
+        echo "alert(\"پنل انتخابی نامعتبر است\")";
+        return;
+    }
+    $stableLocation = $panel ? $panel['code_panel'] : '/all';
     $hidepanel = "{}";
     $stmt = $pdo->prepare("INSERT IGNORE INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (:name_product,:code_product,:price_product,:Volume_constraint,:Service_time,:Location,:agent,:data_limit_reset,:note,:category,:hide_panel,'0')");
     $stmt->bindParam(':name_product', $nameProduct, PDO::PARAM_STR);
@@ -32,7 +43,7 @@ if(!empty($nameProduct)){
     $stmt->bindParam(':price_product', $_POST['price_product'] ?? '', PDO::PARAM_STR);
     $stmt->bindParam(':Volume_constraint', $_POST['volume_product'] ?? '', PDO::PARAM_STR);
     $stmt->bindParam(':Service_time', $_POST['time_product'] ?? '', PDO::PARAM_STR);
-    $stmt->bindParam(':Location', $_POST['namepanel'] ?? '', PDO::PARAM_STR);
+    $stmt->bindParam(':Location', $stableLocation, PDO::PARAM_STR);
     $stmt->bindParam(':agent', $_POST['agent_product'] ?? '', PDO::PARAM_STR);
     $stmt->bindParam(':data_limit_reset', $userdata['data_limit_reset']);
     $stmt->bindParam(':category', $_POST['cetegory_product'] ?? ''  , PDO::PARAM_STR);
@@ -126,6 +137,13 @@ if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
                                     if($list['category'] == null){
                                         $list['category'] = "ندارد";
                                     }
+                                    $displayLocation = $list['Location'];
+                                    if ($displayLocation !== '/all') {
+                                        $displayPanel = resolvePanelByIdentifier($displayLocation);
+                                        if ($displayPanel) {
+                                            $displayLocation = normalizePanelLookupLabel($displayPanel['name_panel']);
+                                        }
+                                    }
                                    echo "<tr class=\"odd gradeX\">
                                         <td>
                                         <input type=\"checkbox\" class=\"checkboxes\" value=\"1\" /></td>
@@ -135,7 +153,7 @@ if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
                                         <td class=\"hidden-phone\">{$list['price_product']}</td>
                                         <td class=\"hidden-phone\">{$list['Volume_constraint']}</td>
                                         <td class=\"hidden-phone\">{$list['Service_time']}</td>
-                                        <td class=\"hidden-phone\">{$list['Location']}</td>
+                                        <td class=\"hidden-phone\">{$displayLocation}</td>
                                         <td class=\"hidden-phone\">{$list['agent']}</td>
                                         <td class=\"hidden-phone\">{$list['data_limit_reset']}</td>
                                         <td class=\"hidden-phone\">{$list['category']}</td>
@@ -203,7 +221,9 @@ if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
                                                 <?php
                                                 if(count($listpanel)>=0){
                                                 foreach($listpanel as $panel){
-                                                echo "<option value = \"{$panel['name_panel']}\">{$panel['name_panel']}</option>";
+                                                $panelLabel = htmlspecialchars(normalizePanelLookupLabel($panel['name_panel']), ENT_QUOTES, 'UTF-8');
+                                                $panelCode = htmlspecialchars($panel['code_panel'], ENT_QUOTES, 'UTF-8');
+                                                echo "<option value = \"{$panelCode}\">{$panelLabel}</option>";
                                                 }
                                                 }
                                                 ?>
@@ -275,4 +295,3 @@ if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
 
 </body>
 </html>
-    

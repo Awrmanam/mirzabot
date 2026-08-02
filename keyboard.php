@@ -530,7 +530,12 @@ if ($table_exists) {
     $stmt->execute();
     $list_marzban_panel_edit_product = ['inline_keyboard' => []];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $list_marzban_panel_edit_product['inline_keyboard'][] = [['text' =>$row['name_panel'],'callback_data' => 'locationedit_'.$row['code_panel']]];
+        $action = ['callback_data' => 'locationedit_' . $row['code_panel']];
+        $list_marzban_panel_edit_product['inline_keyboard'][] = [
+            function_exists('buildStyledPanelButton')
+                ? buildStyledPanelButton($row, $action)
+                : array_merge(['text' => normalizePanelLookupLabel($row['name_panel'])], $action)
+        ];
     }
     $list_marzban_panel_edit_product['inline_keyboard'][] = [['text' =>"همه پنل ها",'callback_data' => 'locationedit_all']];
     $list_marzban_panel_edit_product['inline_keyboard'][] = [['text' =>"▶️ بازگشت به منوی قبل",'callback_data' => 'backproductadmin']];
@@ -841,9 +846,13 @@ $result = $stmt->fetchAll();
 $table_exists = count($result) > 0;
 if ($table_exists) {
     $product = [];
-    $stmt = $pdo->prepare("SELECT * FROM product WHERE Location = :text or Location = '/all' ");
-    $stmt->bindParam(':text', $text  , PDO::PARAM_STR);
-    $stmt->execute();
+    $productLocation = productPanelLocationValues($text);
+    $stmt = $pdo->prepare("SELECT * FROM product
+        WHERE Location = :panel_code OR Location = :panel_name OR Location = '/all'");
+    $stmt->execute([
+        'panel_code' => $productLocation['code_panel'],
+        'panel_name' => $productLocation['name_panel'],
+    ]);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $product[] = [$row['name_product']];
     }
@@ -1497,12 +1506,16 @@ function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscu
 }
 function KeyboardCategory($location,$agent,$backuser = "backuser"){
     global $pdo,$textbotlang;
+    $productLocation = productPanelLocationValues($location);
     $stmt = $pdo->prepare("SELECT * FROM category");
     $stmt->execute();
     $list_category = ['inline_keyboard' => [],];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category AND agent = :agent");
-        $stmts->bindParam(':location', $location, PDO::PARAM_STR);
+        $stmts = $pdo->prepare("SELECT * FROM product WHERE
+            (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+            AND category = :category AND agent = :agent");
+        $stmts->bindParam(':panel_code', $productLocation['code_panel'], PDO::PARAM_STR);
+        $stmts->bindParam(':panel_name', $productLocation['name_panel'], PDO::PARAM_STR);
         $stmts->bindParam(':category', $row['remark'], PDO::PARAM_STR);
         $stmts->bindParam(':agent', $agent);
         $stmts->execute();
@@ -1517,8 +1530,15 @@ function KeyboardCategory($location,$agent,$backuser = "backuser"){
 
 function keyboardTimeCategory($name_panel,$agent,$callback_data = "producttime_",$callback_data_back = "backuser",$statuscustomvolume = false,$statusbtnextend = false){
     global $pdo,$textbotlang;
-    $stmt = $pdo->prepare("SELECT (Service_time) FROM product WHERE (Location = '$name_panel' OR Location = '/all') AND  agent = '$agent'");
-    $stmt->execute();
+    $productLocation = productPanelLocationValues($name_panel);
+    $stmt = $pdo->prepare("SELECT Service_time FROM product WHERE
+        (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+        AND agent = :agent");
+    $stmt->execute([
+        'panel_code' => $productLocation['code_panel'],
+        'panel_name' => $productLocation['name_panel'],
+        'agent' => $agent,
+    ]);
     $montheproduct = array_flip(array_flip($stmt->fetchAll(PDO::FETCH_COLUMN)));
     $monthkeyboard = ['inline_keyboard' => []];
     if (in_array("1",$montheproduct)){

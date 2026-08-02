@@ -403,9 +403,13 @@ switch ($data['actions']) {
                 ));
                 return;
             }
+            $productLocation = productPanelLocationValues($panel['code_panel']);
             while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                $stmts = $pdo->prepare("SELECT * FROM product WHERE (Location = :location OR Location = '/all') AND category = :category AND agent = :agent");
-                $stmts->bindParam(':location', $panel['name_panel'], PDO::PARAM_STR);
+                $stmts = $pdo->prepare("SELECT * FROM product WHERE
+                    (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+                    AND category = :category AND agent = :agent");
+                $stmts->bindParam(':panel_code', $productLocation['code_panel'], PDO::PARAM_STR);
+                $stmts->bindParam(':panel_name', $productLocation['name_panel'], PDO::PARAM_STR);
                 $stmts->bindParam(':category', $result['remark'], PDO::PARAM_STR);
                 $stmts->bindParam(':agent', $user_info['agent']);
                 $stmts->execute();
@@ -456,8 +460,15 @@ switch ($data['actions']) {
                 ));
                 return;
             }
-            $stmt = $pdo->prepare("SELECT (Service_time) FROM product WHERE (Location = '{$panel['name_panel']}' OR Location = '/all') AND  agent = '{$user_info['agent']}'");
-            $stmt->execute();
+            $productLocation = productPanelLocationValues($panel['code_panel']);
+            $stmt = $pdo->prepare("SELECT Service_time FROM product WHERE
+                (Location = :panel_code OR Location = :panel_name OR Location = '/all')
+                AND agent = :agent");
+            $stmt->execute([
+                'panel_code' => $productLocation['code_panel'],
+                'panel_name' => $productLocation['name_panel'],
+                'agent' => $user_info['agent'],
+            ]);
             $montheproduct = array_flip(array_flip($stmt->fetchAll(PDO::FETCH_COLUMN)));
             if (in_array("1", $montheproduct)) {
                 $category_time_list[] = array(
@@ -605,7 +616,8 @@ switch ($data['actions']) {
                 $selected_category_id = $category_remark['id'];
             }
             $time_range_day = $data['time_range_day'] == 0 ? "" : "AND Service_time = '{$data['time_range_day']}'";
-            $stmt = $pdo->prepare("SELECT * FROM product WHERE (Location = '{$panel['name_panel']}' OR Location = '/all')AND agent= '{$user_info['agent']}' $category_remarks $time_range_day");
+            $productLocationCondition = productLocationSqlCondition($panel['code_panel']);
+            $stmt = $pdo->prepare("SELECT * FROM product WHERE {$productLocationCondition} AND agent= '{$user_info['agent']}' $category_remarks $time_range_day");
             $stmt->execute();
             $product_list = [];
             while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {

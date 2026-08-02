@@ -231,12 +231,15 @@ switch ($data['actions'] ?? '') {
         if (!empty($missing_fields)) {
             sendJsonResponse(false, "Missing required fields: " . implode(', ', $missing_fields), []);
         }
+        if (containsLiteralPremiumEmojiToken($data['name'])) {
+            sendJsonResponse(false, "product name must be plain text", [], 200);
+        }
         $prodcut = select("product", "*", "name_product", $data['name'], "count");
         if ($prodcut != 0) {
             sendJsonResponse(false, "product name exits", [], 200);
         }
-        $panel = select("marzban_panel", "*", "code_panel", $data['location'], "select");
-        if (!$panel & $data['location'] != "/all")
+        $panel = $data['location'] === '/all' ? null : resolvePanelByIdentifier($data['location']);
+        if (!$panel && $data['location'] != "/all")
             sendJsonResponse(false, "location not found", [], 200);
         try {
             $randomString = bin2hex(random_bytes(3));
@@ -247,7 +250,7 @@ switch ($data['actions'] ?? '') {
                 'price_product' => $data['price'],
                 'Volume_constraint' => $data['data_limit'],
                 'Service_time' => $data['time'],
-                'Location' => $panel['name_panel'],
+                'Location' => $panel ? $panel['code_panel'] : '/all',
                 'agent' => empty($data['agent']) ? "f" : $data['agent'],
                 'note' => empty($data['note']) ? "" : $data['note'],
                 'data_limit_reset' => empty($data['data_limit_reset']) ? "no_reset" : $data['data_limit_reset'],
@@ -291,6 +294,9 @@ switch ($data['actions'] ?? '') {
         if (!$product) {
             sendJsonResponse(false, "product not found", [], 200);
         }
+        if (isset($data['name']) && containsLiteralPremiumEmojiToken($data['name'])) {
+            sendJsonResponse(false, "product name must be plain text", [], 200);
+        }
         if (isset($data['name']) && $product['name_product'] != $data['name']) {
             $product_check = select("product", "*", "name_product", $data['name'], "count");
             if ($product_check != 0)
@@ -299,12 +305,24 @@ switch ($data['actions'] ?? '') {
         }
 
         try {
+            $stableLocation = $product['Location'];
+            if (isset($data['location'])) {
+                if ($data['location'] === '/all') {
+                    $stableLocation = '/all';
+                } else {
+                    $panel = resolvePanelByIdentifier($data['location']);
+                    if (!$panel) {
+                        sendJsonResponse(false, "location not found", [], 200);
+                    }
+                    $stableLocation = $panel['code_panel'];
+                }
+            }
             $productData = [
                 'name_product' => isset($data['name']) ? $data['name'] : $product['name_product'],
                 'price_product' => isset($data['price']) ? $data['price'] : $product['price_product'],
                 'Volume_constraint' => isset($data['volume']) ? $data['volume'] : $product['Volume_constraint'],
                 'Service_time' => isset($data['time']) ? $data['time'] : $product['Service_time'],
-                'Location' => isset($data['location']) ? $data['location'] : $product['Location'],
+                'Location' => $stableLocation,
                 'agent' => isset($data['agent']) ? $data['agent'] : $product['agent'],
                 'note' => isset($data['note']) ? $data['note'] : $product['note'],
                 'data_limit_reset' => isset($data['data_limit_reset']) ? $data['data_limit_reset'] : $product['data_limit_reset'],
@@ -370,7 +388,7 @@ switch ($data['actions'] ?? '') {
         if (!$product) {
             sendJsonResponse(false, "product not found", [], 200);
         }
-        $panel = select("marzban_panel", "*", 'name_panel', $product['Location'], "select");
+        $panel = resolvePanelByIdentifier($product['Location']);
         if ($panel['type'] == "marzban") {
             if ($new_marzban) {
                 $DataUserOut = getuser($data['input'], $panel['name_panel']);
