@@ -126,12 +126,14 @@ try {
     $schemaVersionStmt->execute();
     $schemaVersion = (int) $schemaVersionStmt->fetchColumn();
 
+    $tableExists = function ($tableName) use ($pdo) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+        $stmt->execute([$tableName]);
+        return (int) $stmt->fetchColumn() > 0;
+    };
+
     if ($schemaVersion < 1) {
-        $tableExists = function ($tableName) use ($pdo) {
-            $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
-            $stmt->execute([$tableName]);
-            return (bool) $stmt->fetchColumn();
-        };
         $columnExists = function ($tableName, $columnName) use ($pdo) {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
@@ -202,9 +204,7 @@ try {
     }
 
     if ($schemaVersion < 2) {
-        $ticketTableStmt = $pdo->prepare("SHOW TABLES LIKE 'ticket_content'");
-        $ticketTableStmt->execute();
-        if ($ticketTableStmt->fetchColumn()) {
+        if ($tableExists('ticket_content')) {
             $pdo->prepare("UPDATE ticket_content
                 SET value = 'انتخاب از کتابخانه ایموجی'
                 WHERE content_key = 'admin_edit_custom_emoji'

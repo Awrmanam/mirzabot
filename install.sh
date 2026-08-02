@@ -1,4 +1,8 @@
 #!/bin/bash
+readonly MIRZA_SOURCE_BRANCH="fix/installer-premium-emoji-activation"
+readonly MIRZA_SOURCE_ARCHIVE_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
+readonly MIRZA_SOURCE_INSTALLER_URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/refs/heads/${MIRZA_SOURCE_BRANCH}/install.sh"
+
 # Checking Root Access
 if [[ $EUID -ne 0 ]]; then
     echo -e "\033[31m[ERROR]\033[0m Please run this script as \033[1mroot\033[0m."
@@ -8,7 +12,7 @@ fi
 function self_update_script() {
     local MASTER_PATH="/root/install.sh"
     local BIN_LINK="/usr/local/bin/mirza"
-    local URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh"
+    local URL="$MIRZA_SOURCE_INSTALLER_URL"
     local TEMP_FILE="/tmp/mirza_pro_update.sh"
     echo -e "\e[33mChecking for updates...\033[0m"
     wget -q -O "$TEMP_FILE" "$URL"
@@ -227,6 +231,109 @@ EOF
     echo -e "\e[91mAll mirrors failed. Restored original sources.list\033[0m"
     return 1
 }
+verify_premium_emoji_package_files() {
+    local bot_directory="$1"
+    local required_file
+    local required_files=(
+        "emoji_system.php"
+        "emoji_install.php"
+        "scripts/migrate_custom_emoji.php"
+        "scripts/verify_custom_emoji_install.php"
+    )
+
+    for required_file in "${required_files[@]}"; do
+        if [ ! -f "$bot_directory/$required_file" ]; then
+            echo -e "\e[91mError: Premium Emoji package file is missing: $bot_directory/$required_file\033[0m"
+            return 1
+        fi
+    done
+}
+
+ensure_premium_emoji_php_modules() {
+    local php_version
+    local module
+    local missing_modules=()
+    local packages=()
+    local needs_mysql_package=0
+
+    if ! command -v php >/dev/null 2>&1; then
+        echo -e "\e[91mError: PHP CLI is required for Premium Emoji migration but was not found.\033[0m"
+        return 1
+    fi
+
+    php_version=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;') || {
+        echo -e "\e[91mError: Unable to determine the active PHP CLI version for Premium Emoji setup.\033[0m"
+        return 1
+    }
+
+    for module in mysqli pdo_mysql curl mbstring; do
+        if ! php -r "exit(extension_loaded('$module') ? 0 : 1);"; then
+            missing_modules+=("$module")
+            if [ "$module" = "mysqli" ] || [ "$module" = "pdo_mysql" ]; then
+                needs_mysql_package=1
+            fi
+        fi
+    done
+
+    if [ "${#missing_modules[@]}" -gt 0 ]; then
+        if [ "$needs_mysql_package" -eq 1 ]; then
+            packages+=("php${php_version}-mysql")
+        fi
+        [[ " ${missing_modules[*]} " == *" curl "* ]] && packages+=("php${php_version}-curl")
+        [[ " ${missing_modules[*]} " == *" mbstring "* ]] && packages+=("php${php_version}-mbstring")
+
+        echo -e "\e[33mInstalling missing PHP modules for Premium Emoji: ${missing_modules[*]}\033[0m"
+        sudo apt-get install -y "${packages[@]}" || {
+            echo -e "\e[91mError: Failed to install PHP ${php_version} packages required by Premium Emoji: ${packages[*]}\033[0m"
+            return 1
+        }
+        if command -v phpenmod >/dev/null 2>&1; then
+            sudo phpenmod -v "$php_version" -s cli mysqli pdo_mysql curl mbstring >/dev/null 2>&1 || true
+        fi
+    fi
+
+    for module in mysqli pdo_mysql curl mbstring; do
+        if ! php -r "exit(extension_loaded('$module') ? 0 : 1);"; then
+            echo -e "\e[91mError: Required PHP module '$module' is unavailable after installation; Premium Emoji setup cannot continue.\033[0m"
+            return 1
+        fi
+    done
+}
+
+install_premium_emoji_schema() {
+    local bot_directory="$1"
+    local php_file
+
+    verify_premium_emoji_package_files "$bot_directory" || return 1
+    ensure_premium_emoji_php_modules || return 1
+
+    for php_file in \
+        "$bot_directory/emoji_system.php" \
+        "$bot_directory/emoji_install.php" \
+        "$bot_directory/scripts/migrate_custom_emoji.php"; do
+        php -l "$php_file" >/dev/null || {
+            echo -e "\e[91mError: PHP syntax validation failed for Premium Emoji file: $php_file\033[0m"
+            return 1
+        }
+    done
+
+    echo -e "\e[33mInstalling Premium Emoji database schema...\033[0m"
+    php "$bot_directory/scripts/migrate_custom_emoji.php" || {
+        echo -e "\e[91mError: Premium Emoji migration failed: php $bot_directory/scripts/migrate_custom_emoji.php\033[0m"
+        return 1
+    }
+    if [ -d "$bot_directory/storage" ]; then
+        sudo chown -R www-data:www-data "$bot_directory/storage" || {
+            echo -e "\e[91mError: Failed to assign Premium Emoji runtime storage to www-data.\033[0m"
+            return 1
+        }
+    fi
+    php "$bot_directory/scripts/verify_custom_emoji_install.php" || {
+        echo -e "\e[91mError: Premium Emoji post-install verification failed.\033[0m"
+        return 1
+    }
+}
+
 # Install Function for Mirza Pro
 function install_bot() {
     echo -e "\e[32mInstalling Mirza Pro script ... \033[0m\n"
@@ -418,7 +525,7 @@ function install_bot() {
         exit 1
     fi
     # CHANGED: Always download from main branch (No releases for Pro)
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip"
+    ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"
     echo -e "\033[33mDownloading Mirza Pro from Main Branch...\033[0m"
     # Download and extract the repository
     TEMP_DIR="/tmp/mirzaprobot"
@@ -437,6 +544,7 @@ function install_bot() {
     rm -rf "$TEMP_DIR"
     sudo chown -R www-data:www-data "$BOT_DIR"
     sudo chmod -R 755 "$BOT_DIR"
+    verify_premium_emoji_package_files "$BOT_DIR" || exit 1
     echo -e "\n\033[33mMirza Pro config and script have been installed successfully.\033[0m"
     wait
     if [ ! -d "/root/confmirza" ]; then
@@ -861,14 +969,18 @@ try { \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options); } catch (\P
 \$adminnumber = '${YOUR_CHAT_ID}';
 \$domainhosts = '${YOUR_DOMAIN}';
 \$usernamebot = '${YOUR_BOTNAME}';
-\$customEmojiFlag = getenv('CUSTOM_EMOJI_ENABLED');
-define('CUSTOM_EMOJI_ENABLED', \$customEmojiFlag !== false ? filter_var(\$customEmojiFlag, FILTER_VALIDATE_BOOLEAN) : false);
-\$customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
-define('CUSTOM_EMOJI_USAGE_TRACKING', \$customEmojiUsageFlag !== false ? filter_var(\$customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN) : false);
-\$appDebugFlag = getenv('APP_DEBUG');
-define('APP_DEBUG', \$appDebugFlag !== false ? filter_var(\$appDebugFlag, FILTER_VALIDATE_BOOLEAN) : false);
-\$configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
-define('MIRZA_MEMORY_LIMIT', preg_match('/^[1-9][0-9]*[KMG]$/i', \$configuredMemoryLimit) ? strtoupper(\$configuredMemoryLimit) : '256M');
+if (!defined('CUSTOM_EMOJI_ENABLED')) {
+    define('CUSTOM_EMOJI_ENABLED', true);
+}
+if (!defined('CUSTOM_EMOJI_USAGE_TRACKING')) {
+    define('CUSTOM_EMOJI_USAGE_TRACKING', false);
+}
+if (!defined('APP_DEBUG')) {
+    define('APP_DEBUG', false);
+}
+if (!defined('MIRZA_MEMORY_LIMIT')) {
+    define('MIRZA_MEMORY_LIMIT', '256M');
+}
 ?>
 EOF
             sleep 1
@@ -894,6 +1006,7 @@ EOF
             curl -k --max-time 10 $url > /dev/null 2>&1 || {
                 echo -e "\e[93mWarning: Could not reach URL immediately, but installation may still be successful.\033[0m"
             }
+            install_premium_emoji_schema "$BOT_DIR" || exit 1
             clear
             echo " "
             echo -e "\e[102mDomain Bot: https://${YOUR_DOMAIN}\033[0m"
@@ -1404,7 +1517,7 @@ function update_bot() {
         exit 1
     fi
     # Fetch latest version from GitHub (Always Main Branch for Pro)
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip"
+    ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"
     # Create temporary directory
     TEMP_DIR="/tmp/mirzaprobot_update"
     mkdir -p "$TEMP_DIR"
@@ -2768,7 +2881,7 @@ function migrate_to_pro() {
 
     # Download Pro Source
     echo -e "\033[33mDownloading Mirza Pro Source...\033[0m"
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip"
+    ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"
     TEMP_DIR="/tmp/mirza_pro_mig"
     mkdir -p "$TEMP_DIR"
     wget -q -O "$TEMP_DIR/bot.zip" "$ZIP_URL"
@@ -2799,14 +2912,18 @@ try { \$pdo = new PDO(\$dsn, \$usernamedb, \$passworddb, \$options); } catch (\P
 \$adminnumber = '${OLD_ADMIN_ID}';
 \$domainhosts = '${DOMAIN_NAME}';
 \$usernamebot = '${OLD_BOT_NAME}';
-\$customEmojiFlag = getenv('CUSTOM_EMOJI_ENABLED');
-define('CUSTOM_EMOJI_ENABLED', \$customEmojiFlag !== false ? filter_var(\$customEmojiFlag, FILTER_VALIDATE_BOOLEAN) : false);
-\$customEmojiUsageFlag = getenv('CUSTOM_EMOJI_USAGE_TRACKING');
-define('CUSTOM_EMOJI_USAGE_TRACKING', \$customEmojiUsageFlag !== false ? filter_var(\$customEmojiUsageFlag, FILTER_VALIDATE_BOOLEAN) : false);
-\$appDebugFlag = getenv('APP_DEBUG');
-define('APP_DEBUG', \$appDebugFlag !== false ? filter_var(\$appDebugFlag, FILTER_VALIDATE_BOOLEAN) : false);
-\$configuredMemoryLimit = trim((string) getenv('MIRZA_MEMORY_LIMIT'));
-define('MIRZA_MEMORY_LIMIT', preg_match('/^[1-9][0-9]*[KMG]$/i', \$configuredMemoryLimit) ? strtoupper(\$configuredMemoryLimit) : '256M');
+if (!defined('CUSTOM_EMOJI_ENABLED')) {
+    define('CUSTOM_EMOJI_ENABLED', true);
+}
+if (!defined('CUSTOM_EMOJI_USAGE_TRACKING')) {
+    define('CUSTOM_EMOJI_USAGE_TRACKING', false);
+}
+if (!defined('APP_DEBUG')) {
+    define('APP_DEBUG', false);
+}
+if (!defined('MIRZA_MEMORY_LIMIT')) {
+    define('MIRZA_MEMORY_LIMIT', '256M');
+}
 ?>
 EOF
 
