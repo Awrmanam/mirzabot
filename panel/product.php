@@ -18,11 +18,13 @@ if( !isset($_SESSION["user"]) || !$result ){
 }
 $nameProduct = $_POST['nameproduct'] ?? null;
 if(!empty($nameProduct)){
-    if (containsLiteralPremiumEmojiToken($nameProduct)) {
-        echo "alert(\"نام محصول باید متن ساده باشد؛ ایموجی پریمیوم را از بخش شخصی‌سازی تنظیم کنید\")";
+    $productNameInput = extractProductEmojiToken($nameProduct);
+    if (!$productNameInput['ok']) {
+        echo "alert(" . json_encode(strip_tags(productEmojiValidationMessage($productNameInput)), JSON_UNESCAPED_UNICODE) . ")";
         return;
     }
-    $randomString = bin2hex(random_bytes(2));
+    $nameProduct = $productNameInput['name_product'];
+    $randomString = generateUniqueProductCode(2);
     $userdata['data_limit_reset'] = "no_reset";
     $product = select("product","*","name_product",$nameProduct,"count");
     if($product != 0){
@@ -49,7 +51,25 @@ if(!empty($nameProduct)){
     $stmt->bindParam(':category', $_POST['cetegory_product'] ?? ''  , PDO::PARAM_STR);
     $stmt->bindParam(':note', $_POST['note_product'] ?? ''  , PDO::PARAM_STR);
     $stmt->bindParam(':hide_panel', $hidepanel);
-    $stmt->execute();
+    try {
+        $pdo->beginTransaction();
+        $stmt->execute();
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Product insert did not create exactly one row.');
+        }
+        if ($productNameInput['emoji_key'] !== ''
+            && !saveProductEmojiMapping($randomString, $productNameInput['emoji_key'])) {
+            throw new RuntimeException('Product emoji mapping was not saved.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Product Emoji] web create failed for generated product code');
+        echo "alert(\"محصول ذخیره نشد؛ لطفاً دوباره تلاش کنید\")";
+        return;
+    }
     header("Location: product.php");
 }
 if(isset($_GET['oneproduct'], $_GET['toweproduct']) && $_GET['oneproduct'] !== '' && $_GET['toweproduct'] !== ''){
@@ -60,9 +80,31 @@ if(isset($_GET['oneproduct'], $_GET['toweproduct']) && $_GET['oneproduct'] !== '
 }
 
 if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
-    $stmt = $connect->prepare("DELETE FROM product WHERE id = ?");
-    $stmt->bind_param("s", $_GET['removeid']);
-    $stmt->execute();
+    $productToDelete = select("product", "*", "id", (int) $_GET['removeid'], "select", ['cache' => false]);
+    if (!$productToDelete) {
+        header("Location: product.php");
+        return;
+    }
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("DELETE FROM product WHERE id = :product_id");
+        $stmt->bindValue(':product_id', (int) $productToDelete['id'], PDO::PARAM_INT);
+        $stmt->execute();
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Product delete did not remove exactly one row.');
+        }
+        if (!cleanupProductEmojiMappingAfterDelete($productToDelete['code_product'])) {
+            throw new RuntimeException('Product emoji mapping cleanup failed.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Product Emoji] web delete failed for product id ' . (int) $productToDelete['id']);
+        header("Location: product.php?delete_error=1");
+        return;
+    }
     header("Location: product.php");
 }
 ?>

@@ -20,19 +20,43 @@ if($product == false){
 }else{
 if($_GET['action'] == "save"){
     $name_product = htmlspecialchars($_POST['name_product'], ENT_QUOTES, 'UTF-8');
-    if (containsLiteralPremiumEmojiToken($name_product)) {
+    $productNameInput = extractProductEmojiToken($name_product);
+    if (!$productNameInput['ok']) {
         $statusmessage = true;
-        $infomesssage = "نام محصول باید متن ساده باشد؛ ایموجی پریمیوم را از بخش شخصی‌سازی تنظیم کنید.";
+        $infomesssage = strip_tags(productEmojiValidationMessage($productNameInput));
+    } else {
+        $name_product = $productNameInput['name_product'];
     }
-    $prodcutcheck = select("product","*","name_product",$name_product,"count");
-    if (containsLiteralPremiumEmojiToken($name_product)) {
-        // The validation message above is preserved and no business value is updated.
+    $prodcutcheck = $product['name_product'] === $name_product
+        ? 0
+        : select("product","*","name_product",$name_product,"count");
+    if (!$productNameInput['ok']) {
+        // Validation message above is preserved and no product identity is changed.
     } elseif($prodcutcheck != 0){
         $statusmessage = true;
         $infomesssage ="نام محصول وجود دارد.";
     }else{
-        if($product['name_product'] != $name_product){
-            update("product","name_product",$name_product,"id",$id_product);
+        try {
+            $pdo->beginTransaction();
+            if($product['name_product'] != $name_product){
+                $stmt = $pdo->prepare("UPDATE product SET name_product = :name_product WHERE id = :product_id");
+                $stmt->execute([
+                    'name_product' => $name_product,
+                    'product_id' => (int) $id_product,
+                ]);
+            }
+            if ($productNameInput['emoji_key'] !== ''
+                && !saveProductEmojiMapping($product['code_product'], $productNameInput['emoji_key'])) {
+                throw new RuntimeException('Product emoji mapping update failed.');
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[Product Emoji] web rename failed for product id ' . (int) $id_product);
+            $statusmessage = true;
+            $infomesssage = "نام محصول بروزرسانی نشد؛ لطفاً دوباره تلاش کنید.";
         }
     }
     $price_product = htmlspecialchars($_POST['price_product'], ENT_QUOTES, 'UTF-8');

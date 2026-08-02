@@ -1512,9 +1512,11 @@ $textconnect
                 $result['price_product'] = number_format($result['price_product']);
                 $namekeyboard = $result['name_product'] . " - " . $result['price_product'] . "تومان";
             }
-            $productextend['inline_keyboard'][] = [
-                ['text' => $namekeyboard, 'callback_data' => "serviceextendselect_" . $result['code_product']]
-            ];
+            $productextend['inline_keyboard'][] = [buildStyledProductButton(
+                $result,
+                $namekeyboard,
+                ['callback_data' => "serviceextendselect_" . $result['code_product']]
+            )];
         }
         $productextend['inline_keyboard'][] = [
             ['text' => "♻️ تمدید پلن فعلی", 'callback_data' => "exntedagei"]
@@ -1586,9 +1588,11 @@ $textconnect
             $result['price_product'] = number_format($result['price_product']);
             $namekeyboard = $result['name_product'] . " - " . $result['price_product'] . "تومان";
         }
-        $productextend['inline_keyboard'][] = [
-            ['text' => $namekeyboard, 'callback_data' => "serviceextendselect_" . $result['code_product']]
-        ];
+        $productextend['inline_keyboard'][] = [buildStyledProductButton(
+            $result,
+            $namekeyboard,
+            ['callback_data' => "serviceextendselect_" . $result['code_product']]
+        )];
     }
     if ($nameloc['name_product'] == "🛍 حجم دلخواه" || $nameloc['name_product'] == "⚙️ سرویس دلخواه") {
         $productextend['inline_keyboard'][] = [

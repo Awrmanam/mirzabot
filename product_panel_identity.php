@@ -5,6 +5,168 @@ function containsLiteralPremiumEmojiToken($value)
     return preg_match('/\{emoji:[^{}]+\}/iu', (string) $value) === 1;
 }
 
+function normalizeProductBusinessName($value)
+{
+    $value = preg_replace('/[\p{Z}\s]+/u', ' ', (string) $value);
+    return trim((string) $value);
+}
+
+function validateProductEmojiKey($emojiKey)
+{
+    global $pdo;
+
+    $emojiKey = trim((string) $emojiKey);
+    if (!preg_match('/^[a-z0-9_]{1,100}$/', $emojiKey)) {
+        return ['ok' => false, 'error' => 'invalid_syntax', 'emoji_key' => $emojiKey];
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT `key`, is_active FROM styled_emojis WHERE `key` = :emoji_key LIMIT 2");
+        $stmt->execute(['emoji_key' => $emojiKey]);
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => 'emoji_system_unavailable', 'emoji_key' => $emojiKey];
+    }
+
+    if (count($matches) !== 1) {
+        return ['ok' => false, 'error' => 'unknown_key', 'emoji_key' => $emojiKey];
+    }
+    if ((int) $matches[0]['is_active'] !== 1) {
+        return ['ok' => false, 'error' => 'inactive_key', 'emoji_key' => $emojiKey];
+    }
+
+    return ['ok' => true, 'error' => '', 'emoji_key' => (string) $matches[0]['key']];
+}
+
+function extractProductEmojiToken($value)
+{
+    $value = (string) $value;
+    $markerCount = preg_match_all('/\{\s*emoji\s*:/iu', $value, $markerMatches);
+
+    if ($markerCount === 0) {
+        if (preg_match('/emoji\s*:/iu', $value)) {
+            return ['ok' => false, 'error' => 'invalid_syntax', 'name_product' => '', 'emoji_key' => ''];
+        }
+        return ['ok' => true, 'error' => '', 'name_product' => $value, 'emoji_key' => ''];
+    }
+    if ($markerCount > 1) {
+        return ['ok' => false, 'error' => 'multiple_tokens', 'name_product' => '', 'emoji_key' => ''];
+    }
+
+    if (preg_match_all('/\{emoji:([a-z0-9_]{1,100})\}/u', $value, $validMatches) !== 1) {
+        return ['ok' => false, 'error' => 'invalid_syntax', 'name_product' => '', 'emoji_key' => ''];
+    }
+
+    $validation = validateProductEmojiKey($validMatches[1][0]);
+    if (!$validation['ok']) {
+        return array_merge($validation, ['name_product' => '']);
+    }
+
+    $plainName = preg_replace('/\{emoji:[a-z0-9_]{1,100}\}/u', '', $value, 1);
+    $plainName = normalizeProductBusinessName($plainName);
+    if ($plainName === '') {
+        return ['ok' => false, 'error' => 'empty_name', 'name_product' => '', 'emoji_key' => $validation['emoji_key']];
+    }
+
+    return [
+        'ok' => true,
+        'error' => '',
+        'name_product' => $plainName,
+        'emoji_key' => $validation['emoji_key'],
+    ];
+}
+
+function productEmojiValidationMessage(array $result)
+{
+    $emojiKey = htmlspecialchars((string) ($result['emoji_key'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    switch ($result['error'] ?? '') {
+        case 'multiple_tokens':
+            return '❌ فعلاً فقط یک توکن ایموجی پریمیوم برای هر محصول قابل استفاده است.';
+        case 'unknown_key':
+            return "❌ کلید ایموجی <code>{$emojiKey}</code> در کتابخانه ایموجی‌ها وجود ندارد.";
+        case 'inactive_key':
+            return "❌ ایموجی <code>{$emojiKey}</code> غیرفعال است و قابل استفاده نیست.";
+        case 'empty_name':
+            return '❌ نام محصول پس از حذف توکن ایموجی خالی است.';
+        case 'emoji_system_unavailable':
+            return '❌ سامانه ایموجی پریمیوم در دسترس نیست؛ محصول ذخیره نشد.';
+        default:
+            return '❌ قالب توکن ایموجی نامعتبر است. قالب صحیح: <code>{emoji:key}</code>';
+    }
+}
+
+function saveProductEmojiMapping($codeProduct, $emojiKey)
+{
+    global $pdo;
+
+    $codeProduct = trim((string) $codeProduct);
+    $validation = validateProductEmojiKey($emojiKey);
+    if ($codeProduct === '' || !$validation['ok']) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare("INSERT INTO styled_button_icons
+        (source_type, source_key, icon_emoji_key) VALUES ('product', :source_key, :emoji_key)
+        ON DUPLICATE KEY UPDATE icon_emoji_key = VALUES(icon_emoji_key)");
+    $saved = $stmt->execute([
+        'source_key' => $codeProduct,
+        'emoji_key' => $validation['emoji_key'],
+    ]);
+    unset($GLOBALS['styled_runtime_source_icon_map']['product:' . $codeProduct]);
+    return $saved;
+}
+
+function deleteProductEmojiMapping($codeProduct)
+{
+    global $pdo;
+
+    $codeProduct = trim((string) $codeProduct);
+    if ($codeProduct === '') {
+        return true;
+    }
+
+    $stmt = $pdo->prepare("DELETE FROM styled_button_icons
+        WHERE source_type = 'product' AND source_key = :source_key");
+    $deleted = $stmt->execute(['source_key' => $codeProduct]);
+    unset($GLOBALS['styled_runtime_source_icon_map']['product:' . $codeProduct]);
+    return $deleted;
+}
+
+function cleanupProductEmojiMappingAfterDelete($codeProduct)
+{
+    global $pdo;
+
+    $codeProduct = trim((string) $codeProduct);
+    if ($codeProduct === '') {
+        return true;
+    }
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM product WHERE code_product = :code_product");
+    $stmt->execute(['code_product' => $codeProduct]);
+    if ((int) $stmt->fetchColumn() > 0) {
+        return true;
+    }
+
+    return deleteProductEmojiMapping($codeProduct);
+}
+
+function generateUniqueProductCode($bytes = 2)
+{
+    global $pdo;
+
+    $bytes = max(2, (int) $bytes);
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM product WHERE code_product = :code_product");
+    for ($attempt = 0; $attempt < 10; $attempt++) {
+        $codeProduct = bin2hex(random_bytes($bytes));
+        $stmt->execute(['code_product' => $codeProduct]);
+        if ((int) $stmt->fetchColumn() === 0) {
+            return $codeProduct;
+        }
+    }
+
+    throw new RuntimeException('Unable to allocate a unique product code.');
+}
+
 function normalizePanelLookupLabel($value)
 {
     $value = preg_replace('/\{emoji:[^{}]+\}\s*/iu', '', (string) $value);

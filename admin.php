@@ -3218,19 +3218,22 @@ $caption";
     sendmessage($from_id, $textbotlang['Admin']['Product']['AddProductStepOne'], $backadmin, 'HTML');
     step('get_limit', $from_id);
 } elseif ($user['step'] == "get_limit") {
-    if (containsLiteralPremiumEmojiToken($text)) {
-        sendmessage($from_id, "❌ نام محصول باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+    $productNameInput = extractProductEmojiToken($text);
+    if (!$productNameInput['ok']) {
+        sendmessage($from_id, productEmojiValidationMessage($productNameInput), $backadmin, 'HTML');
         return;
     }
-    if (strlen($text) > 150) {
+    $plainProductName = $productNameInput['name_product'];
+    if (strlen($plainProductName) > 150) {
         sendmessage($from_id, "❌ نام محصول باید کمتر از 150 کاراکتر باشد", $backadmin, 'HTML');
         return;
     }
-    if (in_array($text, $name_product)) {
-        sendmessage($from_id, "❌ محصول با نام $text وجود دارد", $backadmin, 'HTML');
+    if (in_array($plainProductName, $name_product)) {
+        sendmessage($from_id, "❌ محصول با نام $plainProductName وجود دارد", $backadmin, 'HTML');
         return;
     }
-    savedata("clear", "name_product", $text);
+    savedata("clear", "name_product", $plainProductName);
+    savedata("save", "product_emoji_key", $productNameInput['emoji_key']);
     sendmessage($from_id, $textbotlang['Admin']['agent']['setagentproduct'], $backadmin, 'HTML');
     step('get_agent', $from_id);
 } elseif ($user['step'] == "get_agent") {
@@ -3339,6 +3342,15 @@ $caption";
         sendmessage($from_id, "❌ نام محصول شامل توکن ایموجی است و ذخیره نشد.", $backadmin, 'HTML');
         return;
     }
+    $productEmojiKey = trim((string) ($userdata['product_emoji_key'] ?? ''));
+    if ($productEmojiKey !== '') {
+        $emojiValidation = validateProductEmojiKey($productEmojiKey);
+        if (!$emojiValidation['ok']) {
+            sendmessage($from_id, productEmojiValidationMessage($emojiValidation), $backadmin, 'HTML');
+            return;
+        }
+        $productEmojiKey = $emojiValidation['emoji_key'];
+    }
     if (($userdata['Location'] ?? '') !== '/all') {
         $selectedPanel = resolvePanelByIdentifier($userdata['Location'] ?? '');
         if (!$selectedPanel) {
@@ -3348,7 +3360,7 @@ $caption";
         }
         $userdata['Location'] = (string) $selectedPanel['code_panel'];
     }
-    $randomString = bin2hex(random_bytes(2));
+    $randomString = generateUniqueProductCode(2);
     $varhide_panel = "{}";
     if (!isset($userdata['category']))
         $userdata['category'] = null;
@@ -3364,7 +3376,25 @@ $caption";
     $stmt->bindParam(':category', $userdata['category'], PDO::PARAM_STR);
     $stmt->bindParam(':note', $text, PDO::PARAM_STR);
     $stmt->bindParam(':hide_panel', $varhide_panel, PDO::PARAM_STR);
-    $stmt->execute();
+    try {
+        $pdo->beginTransaction();
+        $stmt->execute();
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Product insert did not create exactly one row.');
+        }
+        if ($productEmojiKey !== '' && !saveProductEmojiMapping($randomString, $productEmojiKey)) {
+            throw new RuntimeException('Product emoji mapping was not saved.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Product Emoji] create failed for product code ' . $randomString);
+        sendmessage($from_id, "❌ محصول ذخیره نشد؛ لطفاً دوباره تلاش کنید.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     sendmessage($from_id, $textbotlang['Admin']['Product']['SaveProduct'], $shopkeyboard, 'HTML');
     step('home', $from_id);
 } elseif ($text == "👨‍🔧 بخش ادمین" && $adminrulecheck['rule'] == "administrator") {
@@ -3582,14 +3612,36 @@ $caption";
         return;
     }
     $location = productPanelLocationValues($user['Processing_value']);
-    $stmt = $pdo->prepare("DELETE FROM product WHERE id = :product_id
+    $stmt = $pdo->prepare("SELECT id, code_product FROM product WHERE id = :product_id
         AND (Location = :panel_code OR Location = :panel_name OR Location = '/all')");
     $stmt->bindValue(':product_id', (int) $productSelection[1], PDO::PARAM_INT);
     $stmt->bindValue(':panel_code', $location['code_panel'], PDO::PARAM_STR);
     $stmt->bindValue(':panel_name', $location['name_panel'], PDO::PARAM_STR);
     $stmt->execute();
-    if ($stmt->rowCount() !== 1) {
+    $productToDelete = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$productToDelete) {
         sendmessage($from_id, "❌ محصول حذف نشد؛ انتخاب نامعتبر یا قدیمی است.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("DELETE FROM product WHERE id = :product_id");
+        $stmt->bindValue(':product_id', (int) $productToDelete['id'], PDO::PARAM_INT);
+        $stmt->execute();
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Product delete did not remove exactly one row.');
+        }
+        if (!cleanupProductEmojiMappingAfterDelete($productToDelete['code_product'])) {
+            throw new RuntimeException('Product emoji mapping cleanup failed.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Product Emoji] delete failed for product id ' . (int) $productToDelete['id']);
+        sendmessage($from_id, "❌ محصول حذف نشد؛ لطفاً دوباره تلاش کنید.", $shopkeyboard, 'HTML');
         step('home', $from_id);
         return;
     }
@@ -3730,22 +3782,46 @@ $caption";
     sendmessage($from_id, "نام جدید را ارسال کنید", $backadmin, 'HTML');
     step('change_name', $from_id);
 } elseif ($user['step'] == "change_name") {
-    if (containsLiteralPremiumEmojiToken($text)) {
-        sendmessage($from_id, "❌ نام محصول باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+    $productNameInput = extractProductEmojiToken($text);
+    if (!$productNameInput['ok']) {
+        sendmessage($from_id, productEmojiValidationMessage($productNameInput), $backadmin, 'HTML');
         return;
     }
-    if (strlen($text) > 150) {
+    $plainProductName = $productNameInput['name_product'];
+    if (strlen($plainProductName) > 150) {
         sendmessage($from_id, "❌ نام محصول باید کمتر از 150 کاراکتر باشد", $backadmin, 'HTML');
         return;
     }
-    if (in_array($text, $name_product)) {
-        sendmessage($from_id, "❌ محصول با نام $text وجود دارد", $backadmin, 'HTML');
+    $product = select("product", "*", "id", $user['Processing_value'], "select", ['cache' => false]);
+    if (!$product) {
+        sendmessage($from_id, "❌ محصول انتخابی دیگر وجود ندارد.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
         return;
     }
-    $stmt = $pdo->prepare("UPDATE product SET name_product = :name_products WHERE id = :product_id");
-    $stmt->bindParam(':name_products', $text);
-    $stmt->bindParam(':product_id', $user['Processing_value']);
-    $stmt->execute();
+    if ($product['name_product'] !== $plainProductName && in_array($plainProductName, $name_product)) {
+        sendmessage($from_id, "❌ محصول با نام $plainProductName وجود دارد", $backadmin, 'HTML');
+        return;
+    }
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("UPDATE product SET name_product = :name_products WHERE id = :product_id");
+        $stmt->bindValue(':name_products', $plainProductName, PDO::PARAM_STR);
+        $stmt->bindValue(':product_id', (int) $product['id'], PDO::PARAM_INT);
+        $stmt->execute();
+        if ($productNameInput['emoji_key'] !== ''
+            && !saveProductEmojiMapping($product['code_product'], $productNameInput['emoji_key'])) {
+            throw new RuntimeException('Product emoji mapping update failed.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Product Emoji] rename failed for product id ' . (int) $product['id']);
+        sendmessage($from_id, "❌ نام محصول بروزرسانی نشد؛ لطفاً دوباره تلاش کنید.", $shopkeyboard, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     sendmessage($from_id, "✅نام محصول بروزرسانی شد", $change_product, 'HTML');
     step('home', $from_id);
 } elseif ($text == "نوع کاربری" && $adminrulecheck['rule'] == "administrator") {

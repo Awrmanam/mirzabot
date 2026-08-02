@@ -231,10 +231,12 @@ switch ($data['actions'] ?? '') {
         if (!empty($missing_fields)) {
             sendJsonResponse(false, "Missing required fields: " . implode(', ', $missing_fields), []);
         }
-        if (containsLiteralPremiumEmojiToken($data['name'])) {
-            sendJsonResponse(false, "product name must be plain text", [], 200);
+        $productNameInput = extractProductEmojiToken($data['name']);
+        if (!$productNameInput['ok']) {
+            sendJsonResponse(false, productEmojiValidationMessage($productNameInput), [], 200);
         }
-        $prodcut = select("product", "*", "name_product", $data['name'], "count");
+        $plainProductName = $productNameInput['name_product'];
+        $prodcut = select("product", "*", "name_product", $plainProductName, "count");
         if ($prodcut != 0) {
             sendJsonResponse(false, "product name exits", [], 200);
         }
@@ -242,11 +244,11 @@ switch ($data['actions'] ?? '') {
         if (!$panel && $data['location'] != "/all")
             sendJsonResponse(false, "location not found", [], 200);
         try {
-            $randomString = bin2hex(random_bytes(3));
+            $randomString = generateUniqueProductCode(3);
             // Prepare product data
             $productData = [
                 'code_product' => $randomString,
-                'name_product' => $data['name'],
+                'name_product' => $plainProductName,
                 'price_product' => $data['price'],
                 'Volume_constraint' => $data['data_limit'],
                 'Service_time' => $data['time'],
@@ -273,11 +275,23 @@ switch ($data['actions'] ?? '') {
                 $stmt->bindValue(":{$key}", $value);
             }
 
+            $pdo->beginTransaction();
             $stmt->execute();
+            if ($stmt->rowCount() !== 1) {
+                throw new RuntimeException('Product insert did not create exactly one row.');
+            }
+            if ($productNameInput['emoji_key'] !== ''
+                && !saveProductEmojiMapping($randomString, $productNameInput['emoji_key'])) {
+                throw new RuntimeException('Product emoji mapping was not saved.');
+            }
+            $pdo->commit();
             sendJsonResponse(true, "Successful");
 
-        } catch (Exception $e) {
-            error_log("Error in product_add: " . $e->getMessage());
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log("Error in product_add for generated product code");
             sendJsonResponse(false, "An error occurred while editing product");
         }
         break;
@@ -294,14 +308,22 @@ switch ($data['actions'] ?? '') {
         if (!$product) {
             sendJsonResponse(false, "product not found", [], 200);
         }
-        if (isset($data['name']) && containsLiteralPremiumEmojiToken($data['name'])) {
-            sendJsonResponse(false, "product name must be plain text", [], 200);
+        $productNameInput = [
+            'ok' => true,
+            'error' => '',
+            'name_product' => $product['name_product'],
+            'emoji_key' => '',
+        ];
+        if (isset($data['name'])) {
+            $productNameInput = extractProductEmojiToken($data['name']);
+            if (!$productNameInput['ok']) {
+                sendJsonResponse(false, productEmojiValidationMessage($productNameInput), [], 200);
+            }
         }
-        if (isset($data['name']) && $product['name_product'] != $data['name']) {
-            $product_check = select("product", "*", "name_product", $data['name'], "count");
+        if (isset($data['name']) && $product['name_product'] != $productNameInput['name_product']) {
+            $product_check = select("product", "*", "name_product", $productNameInput['name_product'], "count");
             if ($product_check != 0)
                 sendJsonResponse(false, "product name exits", [], 200);
-            update("invoice", "name_product", $data['name'], "name_product", $product['name_product']);
         }
 
         try {
@@ -318,7 +340,7 @@ switch ($data['actions'] ?? '') {
                 }
             }
             $productData = [
-                'name_product' => isset($data['name']) ? $data['name'] : $product['name_product'],
+                'name_product' => $productNameInput['name_product'],
                 'price_product' => isset($data['price']) ? $data['price'] : $product['price_product'],
                 'Volume_constraint' => isset($data['volume']) ? $data['volume'] : $product['Volume_constraint'],
                 'Service_time' => isset($data['time']) ? $data['time'] : $product['Service_time'],
@@ -345,12 +367,30 @@ switch ($data['actions'] ?? '') {
             }
             $stmt->bindValue(":id", $data['id'], PDO::PARAM_INT);
 
+            $pdo->beginTransaction();
             $stmt->execute();
+            if ($productNameInput['emoji_key'] !== ''
+                && !saveProductEmojiMapping($product['code_product'], $productNameInput['emoji_key'])) {
+                throw new RuntimeException('Product emoji mapping update failed.');
+            }
+            if ($product['name_product'] !== $productNameInput['name_product']) {
+                update(
+                    "invoice",
+                    "name_product",
+                    $productNameInput['name_product'],
+                    "name_product",
+                    $product['name_product']
+                );
+            }
+            $pdo->commit();
 
             sendJsonResponse(true, "product updated successfully", [], 200);
 
-        } catch (Exception $e) {
-            error_log("Error in product_edit: " . $e->getMessage());
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log("Error in product_edit for product id " . (int) $product['id']);
             sendJsonResponse(false, "An error occurred while adding product");
         }
         break;
@@ -366,14 +406,25 @@ switch ($data['actions'] ?? '') {
             sendJsonResponse(false, "product not found", [], 200);
         }
         try {
+            $pdo->beginTransaction();
             $stmt = $pdo->prepare("DELETE FROM product  WHERE id = :id");
             $stmt->bindValue(":id", $data['id'], PDO::PARAM_INT);
             $stmt->execute();
+            if ($stmt->rowCount() !== 1) {
+                throw new RuntimeException('Product delete did not remove exactly one row.');
+            }
+            if (!cleanupProductEmojiMappingAfterDelete($product['code_product'])) {
+                throw new RuntimeException('Product emoji mapping cleanup failed.');
+            }
+            $pdo->commit();
 
             sendJsonResponse(true, "product delete successfully", [], 200);
 
-        } catch (Exception $e) {
-            error_log("Error in product delete : " . $e->getMessage());
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log("Error in product delete for product id " . (int) $product['id']);
             sendJsonResponse(false, "An error occurred while delete prodcut");
         }
         break;

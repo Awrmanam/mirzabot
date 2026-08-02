@@ -496,6 +496,7 @@ function styledClearRuntimeCaches()
     $GLOBALS['styled_runtime_emoji_cache'] = [];
     $GLOBALS['styled_runtime_settings'] = [];
     $GLOBALS['styled_runtime_button_icon_map'] = null;
+    $GLOBALS['styled_runtime_source_icon_map'] = [];
     $GLOBALS['styled_runtime_ui_cache'] = [];
     unset($GLOBALS['styled_runtime_global_fallback']);
 }
@@ -960,6 +961,13 @@ function buildStyledPanelButton(array $panel, array $action)
     $namePanel = normalizePanelLookupLabel($panel['name_panel'] ?? '');
     $iconKey = styledButtonIconKeyForSource('marzban_panel', $codePanel);
     return buildStyledButton($namePanel, $action, $iconKey);
+}
+
+function buildStyledProductButton(array $product, $text, array $action)
+{
+    $codeProduct = (string) ($product['code_product'] ?? '');
+    $iconKey = styledButtonIconKeyForSource('product', $codeProduct);
+    return buildStyledButton((string) $text, $action, $iconKey);
 }
 
 function buildStyledButton($text, array $action, $iconEmojiKey = '')

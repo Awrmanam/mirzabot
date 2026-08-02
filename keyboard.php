@@ -1494,9 +1494,14 @@ function KeyboardProduct($location,$query,$pricediscount,$datakeyboard,$statuscu
         if($statusshowprice == "onshowprice"){
             $result['name_product'] = $namekeyboard;
         }
-        $product['inline_keyboard'][] = [
-                ['text' =>  $result['name_product'], 'callback_data' => "{$datakeyboard}{$result['code_product']}{$valuetow}"]
-            ];
+        $productButtonText = $result['name_product'];
+        $productButtonAction = [
+            'callback_data' => "{$datakeyboard}{$result['code_product']}{$valuetow}",
+        ];
+        $productButton = function_exists('buildStyledProductButton')
+            ? buildStyledProductButton($result, $productButtonText, $productButtonAction)
+            : array_merge(['text' => $productButtonText], $productButtonAction);
+        $product['inline_keyboard'][] = [$productButton];
     }
     if ($statuscustom)$product['inline_keyboard'][] = [['text' => $textbotlang['users']['customsellvolume']['title'], 'callback_data' => $customvolume]];
     $product['inline_keyboard'][] = [
