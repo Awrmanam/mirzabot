@@ -548,57 +548,130 @@ EOF
     done
     DOMAIN_NAME="$domainname"
     PATHS=$(cat /root/confmirza/dbrootmirza.txt | grep '$path' | cut -d"'" -f2)
-    sudo ufw allow 80 || {
-        echo -e "\e[91mError: Failed to allow port 80 in UFW.\033[0m"
-        exit 1
+
+    print_ssl_command_failure() {
+        printf '\e[91mError: Command failed:'
+        printf ' %q' "$@"
+        printf '\033[0m\n'
     }
-    sudo ufw allow 443 || {
-        echo -e "\e[91mError: Failed to allow port 443 in UFW.\033[0m"
-        exit 1
+
+    run_ssl_command() {
+        "$@" && return 0
+        print_ssl_command_failure "$@"
+        return 1
     }
-    echo -e "\033[33mDisable apache2\033[0m"
-    wait
-    sudo systemctl stop apache2 || {
-        echo -e "\e[91mError: Failed to stop Apache2.\033[0m"
-        exit 1
-    }
-    sudo systemctl disable apache2 || {
-        echo -e "\e[91mError: Failed to disable Apache2.\033[0m"
-        exit 1
-    }
-    sudo apt install letsencrypt -y || {
-        echo -e "\e[91mError: Failed to install letsencrypt.\033[0m"
-        exit 1
-    }
-    sudo systemctl enable certbot.timer || {
-        echo -e "\e[91mError: Failed to enable certbot timer.\033[0m"
-        exit 1
-    }
-    sudo certbot certonly --standalone --agree-tos --preferred-challenges http -d $DOMAIN_NAME || {
-        echo -e "\e[91mError: Failed to generate SSL certificate.\033[0m"
-        exit 1
-    }
-    sudo apt install python3-certbot-apache -y || {
-        echo -e "\e[91mError: Failed to install python3-certbot-apache.\033[0m"
-        exit 1
-    }
-    sudo certbot --apache --agree-tos --preferred-challenges http -d $DOMAIN_NAME || {
-        echo -e "\e[91mError: Failed to configure SSL with Certbot.\033[0m"
-        exit 1
-    }
-    echo " "
-    echo -e "\033[33mEnable apache2\033[0m"
-    wait
-    sudo systemctl enable apache2 || {
-        echo -e "\e[91mError: Failed to enable Apache2.\033[0m"
-        exit 1
-    }
-    sudo systemctl start apache2 || {
-        echo -e "\e[91mError: Failed to start Apache2.\033[0m"
-        exit 1
-    }
-    # Create Apache VirtualHost configuration for port 80
+
+    run_ssl_command sudo ufw allow 80 || exit 1
+    run_ssl_command sudo ufw allow 443 || exit 1
+    run_ssl_command sudo apt install letsencrypt -y || exit 1
+    run_ssl_command sudo systemctl enable certbot.timer || exit 1
+
     VHOST_FILE="/etc/apache2/sites-available/${DOMAIN_NAME}.conf"
+    VHOST_SSL_FILE="/etc/apache2/sites-available/${DOMAIN_NAME}-ssl.conf"
+    CERT_FULLCHAIN="/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"
+    CERT_PRIVKEY="/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem"
+    VHOST_BACKUP=""
+    VHOST_SSL_BACKUP=""
+    VHOST_EXISTED=0
+    VHOST_SSL_EXISTED=0
+    VHOST_WAS_ENABLED=0
+    VHOST_SSL_WAS_ENABLED=0
+    SSL_SETUP_COMPLETE=0
+
+    ssl_setup_cleanup() {
+        local cleanup_status=0
+
+        if [ "$SSL_SETUP_COMPLETE" -ne 1 ]; then
+            if [ "$VHOST_EXISTED" -eq 1 ]; then
+                sudo cp -a "$VHOST_BACKUP" "$VHOST_FILE" || {
+                    print_ssl_command_failure sudo cp -a "$VHOST_BACKUP" "$VHOST_FILE"
+                    cleanup_status=1
+                }
+            else
+                sudo rm -f "$VHOST_FILE" || cleanup_status=1
+            fi
+
+            if [ "$VHOST_SSL_EXISTED" -eq 1 ]; then
+                sudo cp -a "$VHOST_SSL_BACKUP" "$VHOST_SSL_FILE" || {
+                    print_ssl_command_failure sudo cp -a "$VHOST_SSL_BACKUP" "$VHOST_SSL_FILE"
+                    cleanup_status=1
+                }
+            else
+                sudo rm -f "$VHOST_SSL_FILE" || cleanup_status=1
+            fi
+
+            if [ "$VHOST_WAS_ENABLED" -eq 1 ]; then
+                sudo a2ensite "${DOMAIN_NAME}.conf" >/dev/null || {
+                    print_ssl_command_failure sudo a2ensite "${DOMAIN_NAME}.conf"
+                    cleanup_status=1
+                }
+            else
+                sudo rm -f "/etc/apache2/sites-enabled/${DOMAIN_NAME}.conf" || cleanup_status=1
+            fi
+
+            if [ "$VHOST_SSL_WAS_ENABLED" -eq 1 ]; then
+                sudo a2ensite "${DOMAIN_NAME}-ssl.conf" >/dev/null || {
+                    print_ssl_command_failure sudo a2ensite "${DOMAIN_NAME}-ssl.conf"
+                    cleanup_status=1
+                }
+            else
+                sudo rm -f "/etc/apache2/sites-enabled/${DOMAIN_NAME}-ssl.conf" || cleanup_status=1
+            fi
+
+            sudo systemctl enable apache2 || {
+                print_ssl_command_failure sudo systemctl enable apache2
+                cleanup_status=1
+            }
+            if sudo apache2ctl configtest; then
+                sudo systemctl restart apache2 || {
+                    print_ssl_command_failure sudo systemctl restart apache2
+                    cleanup_status=1
+                }
+            else
+                print_ssl_command_failure sudo apache2ctl configtest
+                sudo systemctl start apache2 || {
+                    print_ssl_command_failure sudo systemctl start apache2
+                    cleanup_status=1
+                }
+            fi
+        fi
+
+        rm -f "$VHOST_BACKUP" "$VHOST_SSL_BACKUP"
+        return "$cleanup_status"
+    }
+
+    if [ -f "$VHOST_FILE" ]; then
+        VHOST_BACKUP=$(mktemp /tmp/mirza-http-vhost.XXXXXX) || {
+            print_ssl_command_failure mktemp /tmp/mirza-http-vhost.XXXXXX
+            exit 1
+        }
+        sudo cp -a "$VHOST_FILE" "$VHOST_BACKUP" || {
+            print_ssl_command_failure sudo cp -a "$VHOST_FILE" "$VHOST_BACKUP"
+            rm -f "$VHOST_BACKUP"
+            exit 1
+        }
+        VHOST_EXISTED=1
+    fi
+    if [ -f "$VHOST_SSL_FILE" ]; then
+        VHOST_SSL_BACKUP=$(mktemp /tmp/mirza-ssl-vhost.XXXXXX) || {
+            print_ssl_command_failure mktemp /tmp/mirza-ssl-vhost.XXXXXX
+            rm -f "$VHOST_BACKUP"
+            exit 1
+        }
+        sudo cp -a "$VHOST_SSL_FILE" "$VHOST_SSL_BACKUP" || {
+            print_ssl_command_failure sudo cp -a "$VHOST_SSL_FILE" "$VHOST_SSL_BACKUP"
+            rm -f "$VHOST_BACKUP" "$VHOST_SSL_BACKUP"
+            exit 1
+        }
+        VHOST_SSL_EXISTED=1
+    fi
+    [ -e "/etc/apache2/sites-enabled/${DOMAIN_NAME}.conf" ] && VHOST_WAS_ENABLED=1
+    [ -e "/etc/apache2/sites-enabled/${DOMAIN_NAME}-ssl.conf" ] && VHOST_SSL_WAS_ENABLED=1
+
+    trap 'ssl_setup_cleanup' EXIT
+    trap 'exit 1' INT TERM
+
+    # Create and activate the HTTP VirtualHost before certificate acquisition.
     sudo tee "$VHOST_FILE" > /dev/null <<EOF
 <VirtualHost *:80>
     ServerName $DOMAIN_NAME
@@ -614,8 +687,49 @@ EOF
     CustomLog \${APACHE_LOG_DIR}/${DOMAIN_NAME}-access.log combined
 </VirtualHost>
 EOF
-    # Create Apache VirtualHost configuration for port 443 (HTTPS)
-    VHOST_SSL_FILE="/etc/apache2/sites-available/${DOMAIN_NAME}-ssl.conf"
+    if [ "$?" -ne 0 ]; then
+        print_ssl_command_failure sudo tee "$VHOST_FILE"
+        exit 1
+    fi
+    if [ "$VHOST_SSL_WAS_ENABLED" -eq 1 ]; then
+        run_ssl_command sudo a2dissite "${DOMAIN_NAME}-ssl.conf" || exit 1
+    fi
+    run_ssl_command sudo a2ensite "${DOMAIN_NAME}.conf" || exit 1
+    run_ssl_command sudo a2enmod rewrite || exit 1
+    run_ssl_command sudo apache2ctl configtest || exit 1
+    run_ssl_command sudo systemctl enable apache2 || exit 1
+    run_ssl_command sudo systemctl restart apache2 || exit 1
+
+    # Reuse a valid certificate with at least 30 days remaining.
+    CERT_REUSE_SECONDS=$((30 * 24 * 60 * 60))
+    if sudo test -s "$CERT_FULLCHAIN" \
+        && sudo test -s "$CERT_PRIVKEY" \
+        && sudo openssl x509 -checkend "$CERT_REUSE_SECONDS" -noout -in "$CERT_FULLCHAIN" >/dev/null 2>&1 \
+        && sudo openssl pkey -check -noout -in "$CERT_PRIVKEY" >/dev/null 2>&1; then
+        echo -e "\e[92mUsing existing valid certificate for ${DOMAIN_NAME}.\033[0m"
+    else
+        CERTBOT_COMMAND=(sudo certbot certonly --webroot --webroot-path "$BOT_DIR" --cert-name "$DOMAIN_NAME" -d "$DOMAIN_NAME" --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring)
+        run_ssl_command "${CERTBOT_COMMAND[@]}" || exit 1
+    fi
+
+    if ! sudo test -s "$CERT_FULLCHAIN"; then
+        print_ssl_command_failure sudo test -s "$CERT_FULLCHAIN"
+        exit 1
+    fi
+    if ! sudo test -s "$CERT_PRIVKEY"; then
+        print_ssl_command_failure sudo test -s "$CERT_PRIVKEY"
+        exit 1
+    fi
+    if ! sudo openssl x509 -checkend 0 -noout -in "$CERT_FULLCHAIN" >/dev/null 2>&1; then
+        print_ssl_command_failure sudo openssl x509 -checkend 0 -noout -in "$CERT_FULLCHAIN"
+        exit 1
+    fi
+    if ! sudo openssl pkey -check -noout -in "$CERT_PRIVKEY" >/dev/null 2>&1; then
+        print_ssl_command_failure sudo openssl pkey -check -noout -in "$CERT_PRIVKEY"
+        exit 1
+    fi
+
+    # Create and activate the explicit SSL VirtualHost with the verified certificate.
     sudo tee "$VHOST_SSL_FILE" > /dev/null <<EOF
 <VirtualHost *:443>
     ServerName $DOMAIN_NAME
@@ -634,45 +748,18 @@ EOF
     CustomLog \${APACHE_LOG_DIR}/${DOMAIN_NAME}-access.log combined
 </VirtualHost>
 EOF
-    # Enable the new virtual hosts
-    sudo a2ensite "${DOMAIN_NAME}.conf" || {
-        echo -e "\e[91mError: Failed to enable VirtualHost for port 80.\033[0m"
+    if [ "$?" -ne 0 ]; then
+        print_ssl_command_failure sudo tee "$VHOST_SSL_FILE"
         exit 1
-    }
-    sudo a2ensite "${DOMAIN_NAME}-ssl.conf" || {
-        echo -e "\e[91mError: Failed to enable VirtualHost for port 443.\033[0m"
-        exit 1
-    }
-    # --- FIX: REMOVE DEFAULT APACHE CONFIGS COMPLETELY ---
-    echo -e "\e[33mRemoving default Apache configurations to prevent conflicts...\033[0m"
-    
-    # 1. Disable sites
-    sudo a2dissite 000-default.conf 2>/dev/null || true
-    sudo a2dissite 000-default-le-ssl.conf 2>/dev/null || true
-    sudo a2dissite default-ssl.conf 2>/dev/null || true
-    
-    # 2. Remove symbolic links in sites-enabled (Forceful cleanup)
-    sudo rm -f /etc/apache2/sites-enabled/000-default.conf
-    sudo rm -f /etc/apache2/sites-enabled/000-default-le-ssl.conf
-    sudo rm -f /etc/apache2/sites-enabled/default-ssl.conf
+    fi
+    run_ssl_command sudo a2enmod ssl || exit 1
+    run_ssl_command sudo a2ensite "${DOMAIN_NAME}-ssl.conf" || exit 1
+    run_ssl_command sudo apache2ctl configtest || exit 1
+    run_ssl_command sudo systemctl reload apache2 || exit 1
 
-    # 3. Remove original files in sites-available (Optional but requested)
-    # This ensures they can never be enabled again by mistake
-    sudo rm -f /etc/apache2/sites-available/000-default.conf
-    sudo rm -f /etc/apache2/sites-available/000-default-le-ssl.conf
-    sudo rm -f /etc/apache2/sites-available/default-ssl.conf
-    sleep 3 
-
-    # Enable SSL module
-    sudo a2enmod ssl || {
-        echo -e "\e[91mError: Failed to enable SSL module.\033[0m"
-        exit 1
-    }
-    # Restart Apache to apply new configuration
-    sudo systemctl restart apache2 || {
-        echo -e "\e[91mError: Failed to restart Apache2 with new configuration.\033[0m"
-        exit 1
-    }
+    SSL_SETUP_COMPLETE=1
+    ssl_setup_cleanup
+    trap - EXIT INT TERM
     clear
     printf "\e[33m[+] \e[36mBot Token: \033[0m"
     read YOUR_BOT_TOKEN
