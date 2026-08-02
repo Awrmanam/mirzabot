@@ -463,24 +463,76 @@ function install_bot() {
         userrr=$(cat /root/confmirza/dbrootmirza.txt | grep '$user' | cut -d"'" -f2)
         sudo mysql -u $userrr -p$passs -e "alter user '$userrr'@'localhost' identified with mysql_native_password by '$passs';FLUSH PRIVILEGES;" || {
             echo -e "\e[91mError: Failed to alter MySQL user. Attempting recovery...\033[0m"
-            # Enable skip-grant-tables at the end of the file
-            sudo sed -i '$ a skip-grant-tables' /etc/mysql/mysql.conf.d/mysqld.cnf
-            sudo systemctl restart mysql
-            # Access MySQL to reset the root user
-            sudo mysql <<EOF
-DROP USER IF EXISTS 'root'@'localhost';
-CREATE USER 'root'@'localhost' IDENTIFIED BY '${passs}';
+            MYSQL_RECOVERY_CONFIG="/etc/mysql/mysql.conf.d/mysqld.cnf"
+            MYSQL_RECOVERY_DEFAULTS_FILE=""
+            cleanup_mysql_root_recovery() {
+                local cleanup_status=0
+
+                if [ -n "$MYSQL_RECOVERY_CONFIG" ]; then
+                    sudo sed -i '/^[[:space:]]*skip-grant-tables[[:space:]]*$/d' "$MYSQL_RECOVERY_CONFIG" || cleanup_status=1
+                    if sudo grep -Eq '^[[:space:]]*skip-grant-tables[[:space:]]*$' "$MYSQL_RECOVERY_CONFIG"; then
+                        cleanup_status=1
+                    fi
+                    sudo systemctl restart mysql || cleanup_status=1
+                    if [ "$cleanup_status" -eq 0 ]; then
+                        MYSQL_RECOVERY_CONFIG=""
+                    fi
+                fi
+
+                if [ -n "$MYSQL_RECOVERY_DEFAULTS_FILE" ]; then
+                    rm -f "$MYSQL_RECOVERY_DEFAULTS_FILE"
+                    MYSQL_RECOVERY_DEFAULTS_FILE=""
+                fi
+
+                return "$cleanup_status"
+            }
+            trap 'cleanup_mysql_root_recovery' EXIT
+            trap 'exit 1' INT TERM
+
+            if ! sudo grep -Eq '^[[:space:]]*skip-grant-tables[[:space:]]*$' "$MYSQL_RECOVERY_CONFIG"; then
+                printf '\nskip-grant-tables\n' | sudo tee -a "$MYSQL_RECOVERY_CONFIG" >/dev/null || {
+                    echo -e "\e[91mError: Failed to enable MySQL recovery mode.\033[0m"
+                    exit 1
+                }
+            fi
+            sudo systemctl restart mysql || {
+                echo -e "\e[91mError: Failed to start MySQL recovery mode.\033[0m"
+                exit 1
+            }
+            sudo mysql -u root >/dev/null 2>&1 <<EOF
+FLUSH PRIVILEGES;
+CREATE USER IF NOT EXISTS 'root'@'localhost';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${passs}';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 EOF
-            # Disable skip-grant-tables
-            sudo sed -i '/skip-grant-tables/d' /etc/mysql/mysql.conf.d/mysqld.cnf
-            sudo systemctl restart mysql
-            # Retry MySQL login with the new credentials
-            echo "SELECT 1" | mysql -u$userrr -p$passs 2>/dev/null || {
+            if [ "$?" -ne 0 ]; then
+                echo -e "\e[91mError: Failed to reset the MySQL root account.\033[0m"
+                exit 1
+            fi
+
+            cleanup_mysql_root_recovery || {
+                echo -e "\e[91mError: Failed to disable MySQL recovery mode.\033[0m"
+                exit 1
+            }
+
+            MYSQL_RECOVERY_DEFAULTS_FILE=$(mktemp /tmp/mirza-mysql-root.XXXXXX) || {
+                echo -e "\e[91mError: Failed to prepare MySQL login verification.\033[0m"
+                exit 1
+            }
+            chmod 600 "$MYSQL_RECOVERY_DEFAULTS_FILE"
+            {
+                printf '[client]\n'
+                printf 'user=root\n'
+                printf 'password=%s\n' "$passs"
+                printf 'host=localhost\n'
+            } > "$MYSQL_RECOVERY_DEFAULTS_FILE"
+            mysql --defaults-extra-file="$MYSQL_RECOVERY_DEFAULTS_FILE" -e "SELECT 1;" >/dev/null 2>&1 || {
                 echo -e "\e[91mError: Recovery failed. MySQL login still not working.\033[0m"
                 exit 1
             }
+            cleanup_mysql_root_recovery
+            trap - EXIT INT TERM
         }
         echo "Folder created successfully!"
     else
@@ -942,7 +994,6 @@ EOF
 #                 echo -e "\e[92mMySQL connection successful (container method).\033[0m"
 #             else
 #                 echo -e "\e[91mError: Failed to connect to MySQL using both methods.\033[0m"
-#                 echo -e "\e[93mPassword used: '$MYSQL_ROOT_PASSWORD'\033[0m"
 #                 echo -e "\e[93mError details:\033[0m"
 #                 cat /tmp/mysql_error.log
 #                 echo -e "\e[93mPlease ensure MySQL is running and the root password is correct.\033[0m"
@@ -962,7 +1013,6 @@ EOF
 #             fi
 #         else
 #             echo -e "\e[91mError: No MySQL container found and direct connection failed.\033[0m"
-#             echo -e "\e[93mPassword used: '$MYSQL_ROOT_PASSWORD'\033[0m"
 #             echo -e "\e[93mError details:\033[0m"
 #             cat /tmp/mysql_error.log
 #             exit 1
