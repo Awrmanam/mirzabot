@@ -24,7 +24,7 @@ assertPanelEmojiStatic(strpos($admin, 'savedata("save", "panel_emoji_key"') !== 
 assertPanelEmojiStatic(strpos($admin, 'savedata("save", "namepanel", $plainPanelName)') !== false, 'Plain panel name is not retained separately.');
 assertPanelEmojiStatic(strpos($admin, 'savePanelEmojiMapping($randomString, $panelEmojiKey)') !== false, 'Panel creation does not map the generated code_panel.');
 assertPanelEmojiStatic(strpos($admin, "savePanelEmojiMapping(\$panel['code_panel']") !== false, 'Panel rename cannot update the stable mapping.');
-assertPanelEmojiStatic(strpos($identity, "deletePanelEmojiMapping(\$panel['code_panel'])") !== false, 'Panel deletion does not clean the stable mapping.');
+assertPanelEmojiStatic(strpos($identity, "deleteCanonicalPanelEmojiMapping(\$panel['code_panel'])") !== false, 'Panel deletion does not clean the canonical stable mapping.');
 assertPanelEmojiStatic(strpos($identity, 'DELETE FROM marzban_panel WHERE code_panel = :code_panel') !== false, 'Panel deletion is not code_panel-based.');
 assertPanelEmojiStatic(strpos($emoji, "styledButtonIconKeyForSource('panel', \$codePanel)") !== false, 'Panel renderer does not prefer the canonical source type.');
 assertPanelEmojiStatic(strpos($emoji, "styledButtonIconKeyForSource('marzban_panel', \$codePanel)") !== false, 'Legacy panel mappings lost backward-compatible rendering.');

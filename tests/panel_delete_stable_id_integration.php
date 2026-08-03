@@ -118,9 +118,11 @@ try {
 
     $deleted = deletePanelByCode('panel_promax');
     panelDeleteAssert($deleted['status'] === 'deleted', 'Renamed Promax panel was not deleted by code_panel.');
+    panelDeleteAssert($deleted['affected_rows'] === 1, 'Stable deletion did not affect exactly one row.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_promax'")->fetchColumn() === 0, 'Promax panel row remains after deletion.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_promax_test' AND name_panel = 'Promax Test'")->fetchColumn() === 1, 'Promax Test was changed or deleted.');
-    panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type IN ('panel', 'marzban_panel') AND source_key = 'panel_promax'")->fetchColumn() === 0, 'Promax panel mappings remain after deletion.');
+    panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'panel' AND source_key = 'panel_promax'")->fetchColumn() === 0, 'Promax canonical panel mapping remains after deletion.');
+    panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'marzban_panel' AND source_key = 'panel_promax'")->fetchColumn() === 1, 'Deletion removed a non-canonical legacy mapping.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'panel' AND source_key = 'panel_promax_test'")->fetchColumn() === 1, 'Another panel mapping was removed.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'product' AND source_key = 'panel_promax'")->fetchColumn() === 1, 'Unrelated product mapping was removed.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'button' AND source_key = 'unrelated_button'")->fetchColumn() === 1, 'Unrelated button mapping was removed.');

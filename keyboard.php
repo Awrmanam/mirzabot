@@ -31,12 +31,14 @@ if (!function_exists('panelAdminSelectionKeyboard')) {
         $stmt = $pdo->query("SELECT * FROM marzban_panel ORDER BY id");
         $keyboard = ['inline_keyboard' => []];
         while ($panel = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $callbackData = (string) $callbackPrefix . (string) $panel['code_panel'];
-            if (strlen($callbackData) > 64) {
+            $descriptor = panelAdminSelectionDescriptor($panel, $callbackPrefix);
+            if ($descriptor === null) {
                 continue;
             }
+            $button = panelKeyboardButton($panel, ['callback_data' => $descriptor['callback_data']]);
+            $button['text'] = $descriptor['text'];
             $keyboard['inline_keyboard'][] = [
-                panelKeyboardButton($panel, ['callback_data' => $callbackData]),
+                $button,
             ];
         }
         $keyboard['inline_keyboard'][] = [[

@@ -162,6 +162,79 @@ function deletePanelEmojiMapping($codePanel)
     return $deleted;
 }
 
+function deleteCanonicalPanelEmojiMapping($codePanel)
+{
+    global $pdo;
+
+    $codePanel = trim((string) $codePanel);
+    if ($codePanel === '') {
+        return true;
+    }
+
+    $stmt = $pdo->prepare("DELETE FROM styled_button_icons
+        WHERE source_type = 'panel' AND source_key = :source_key");
+    $deleted = $stmt->execute(['source_key' => $codePanel]);
+    unset($GLOBALS['styled_runtime_source_icon_map']['panel:' . $codePanel]);
+    return $deleted;
+}
+
+function panelShortCodeSuffix($codePanel, $length = 6)
+{
+    $codePanel = trim((string) $codePanel);
+    $safeCode = preg_replace('/[^A-Za-z0-9_-]/', '', $codePanel);
+    if ($safeCode === '') {
+        $safeCode = substr(hash('sha256', $codePanel), 0, max(4, (int) $length));
+    }
+    return substr($safeCode, -max(4, (int) $length));
+}
+
+function panelAdminSelectionLabel(array $panel)
+{
+    $namePanel = normalizePanelLookupLabel($panel['name_panel'] ?? '');
+    return $namePanel . ' • ' . panelShortCodeSuffix($panel['code_panel'] ?? '');
+}
+
+function panelAdminCallbackData($callbackPrefix, $codePanel)
+{
+    $codePanel = trim((string) $codePanel);
+    if (!preg_match('/^[A-Za-z0-9_-]{1,40}$/', $codePanel)) {
+        return null;
+    }
+    $callbackData = (string) $callbackPrefix . $codePanel;
+    return strlen($callbackData) <= 64 ? $callbackData : null;
+}
+
+function panelAdminSelectionDescriptor(array $panel, $callbackPrefix)
+{
+    $callbackData = panelAdminCallbackData($callbackPrefix, $panel['code_panel'] ?? '');
+    if ($callbackData === null) {
+        return null;
+    }
+    return [
+        'text' => panelAdminSelectionLabel($panel),
+        'callback_data' => $callbackData,
+    ];
+}
+
+function panelDeletionDebugLog($event, array $context = [])
+{
+    $debugEnabled = (defined('APP_DEBUG') && APP_DEBUG)
+        || (defined('MIRZA_TEST_MODE') && MIRZA_TEST_MODE);
+    if (!$debugEnabled) {
+        return;
+    }
+
+    $allowedKeys = ['callback_data', 'resolved_code_panel', 'stored_deletion_state', 'affected_rows'];
+    $safeContext = [];
+    foreach ($allowedKeys as $key) {
+        if (array_key_exists($key, $context)) {
+            $safeContext[$key] = is_scalar($context[$key]) ? (string) $context[$key] : '';
+        }
+    }
+    error_log('[Panel Delete Debug] ' . preg_replace('/[^a-z0-9_.-]/i', '', (string) $event)
+        . ' ' . json_encode($safeContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
 function generateUniquePanelCode($bytes = 2)
 {
     global $pdo;
@@ -204,13 +277,47 @@ function resolvePanelDeletionSelection($storedValue)
     return null;
 }
 
+function resolveAdminPanelState(array $user)
+{
+    foreach (['Processing_value_one', 'Processing_value'] as $field) {
+        $storedValue = trim((string) ($user[$field] ?? ''));
+        if ($storedValue === '') {
+            continue;
+        }
+        $panel = resolvePanelDeletionSelection($storedValue);
+        if ($panel) {
+            return $panel;
+        }
+    }
+    return null;
+}
+
+function panelDeletionPreviewByCode($codePanel)
+{
+    global $pdo;
+
+    $panel = resolvePanelDeletionSelection($codePanel);
+    if (!$panel || $panel['resolved_from'] !== 'code_panel') {
+        return null;
+    }
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM product
+        WHERE Location = :panel_code OR Location = :panel_name");
+    $stmt->execute([
+        'panel_code' => $panel['code_panel'],
+        'panel_name' => $panel['name_panel'],
+    ]);
+    $panel['product_count'] = (int) $stmt->fetchColumn();
+    return $panel;
+}
+
 function deletePanelByCode($codePanel)
 {
     global $pdo;
 
     $codePanel = trim((string) $codePanel);
     if ($codePanel === '') {
-        return ['status' => 'not_found', 'panel' => null, 'products' => []];
+        return ['status' => 'not_found', 'panel' => null, 'products' => [], 'affected_rows' => 0];
     }
 
     try {
@@ -218,9 +325,13 @@ function deletePanelByCode($codePanel)
         $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE code_panel = :code_panel LIMIT 2 FOR UPDATE");
         $stmt->execute(['code_panel' => $codePanel]);
         $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (count($matches) !== 1) {
+        if (count($matches) === 0) {
             $pdo->rollBack();
-            return ['status' => 'not_found', 'panel' => null, 'products' => []];
+            return ['status' => 'not_found', 'panel' => null, 'products' => [], 'affected_rows' => 0];
+        }
+        if (count($matches) > 1) {
+            $pdo->rollBack();
+            return ['status' => 'integrity_error', 'panel' => null, 'products' => [], 'affected_rows' => 0];
         }
         $panel = $matches[0];
 
@@ -233,24 +344,40 @@ function deletePanelByCode($codePanel)
         $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if ($products) {
             $pdo->rollBack();
-            return ['status' => 'has_products', 'panel' => $panel, 'products' => $products];
+            return ['status' => 'has_products', 'panel' => $panel, 'products' => $products, 'affected_rows' => 0];
         }
 
         $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE code_panel = :code_panel");
         $stmt->execute(['code_panel' => $panel['code_panel']]);
-        if ($stmt->rowCount() !== 1) {
-            throw new RuntimeException('Panel delete did not remove exactly one row.');
+        $affectedRows = $stmt->rowCount();
+        panelDeletionDebugLog('delete_execute', [
+            'resolved_code_panel' => $panel['code_panel'],
+            'affected_rows' => $affectedRows,
+        ]);
+        if ($affectedRows === 0) {
+            $pdo->rollBack();
+            return ['status' => 'not_found', 'panel' => $panel, 'products' => [], 'affected_rows' => 0];
         }
-        if (!deletePanelEmojiMapping($panel['code_panel'])) {
+        if ($affectedRows > 1) {
+            $pdo->rollBack();
+            return ['status' => 'integrity_error', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows];
+        }
+        if (!deleteCanonicalPanelEmojiMapping($panel['code_panel'])) {
             throw new RuntimeException('Panel emoji mapping cleanup failed.');
         }
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = :code_panel");
+        $stmt->execute(['code_panel' => $panel['code_panel']]);
+        if ((int) $stmt->fetchColumn() !== 0) {
+            $pdo->rollBack();
+            return ['status' => 'integrity_error', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows];
+        }
         $pdo->commit();
-        return ['status' => 'deleted', 'panel' => $panel, 'products' => []];
+        return ['status' => 'deleted', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        return ['status' => 'failed', 'panel' => null, 'products' => []];
+        return ['status' => 'failed', 'panel' => null, 'products' => [], 'affected_rows' => 0];
     }
 }
 
