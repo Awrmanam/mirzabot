@@ -95,6 +95,90 @@ function productEmojiValidationMessage(array $result)
     }
 }
 
+function extractPanelEmojiToken($value)
+{
+    $result = extractProductEmojiToken($value);
+    $result['name_panel'] = (string) ($result['name_product'] ?? '');
+    unset($result['name_product']);
+    return $result;
+}
+
+function panelEmojiValidationMessage(array $result)
+{
+    $emojiKey = htmlspecialchars((string) ($result['emoji_key'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    switch ($result['error'] ?? '') {
+        case 'multiple_tokens':
+            return '❌ فعلاً فقط یک توکن ایموجی پریمیوم برای هر پنل قابل استفاده است.';
+        case 'unknown_key':
+            return "❌ کلید ایموجی <code>{$emojiKey}</code> در کتابخانه ایموجی‌ها وجود ندارد.";
+        case 'inactive_key':
+            return "❌ ایموجی <code>{$emojiKey}</code> غیرفعال است و قابل استفاده نیست.";
+        case 'empty_name':
+            return '❌ نام پنل پس از حذف توکن ایموجی خالی است.';
+        case 'emoji_system_unavailable':
+            return '❌ سامانه ایموجی پریمیوم در دسترس نیست؛ پنل ذخیره نشد.';
+        default:
+            return '❌ قالب توکن ایموجی نامعتبر است. قالب صحیح: <code>{emoji:key}</code>';
+    }
+}
+
+function savePanelEmojiMapping($codePanel, $emojiKey)
+{
+    global $pdo;
+
+    $codePanel = trim((string) $codePanel);
+    $validation = validateProductEmojiKey($emojiKey);
+    if ($codePanel === '' || !$validation['ok']) {
+        return false;
+    }
+
+    $stmt = $pdo->prepare("INSERT INTO styled_button_icons
+        (source_type, source_key, icon_emoji_key) VALUES ('panel', :source_key, :emoji_key)
+        ON DUPLICATE KEY UPDATE icon_emoji_key = VALUES(icon_emoji_key)");
+    $saved = $stmt->execute([
+        'source_key' => $codePanel,
+        'emoji_key' => $validation['emoji_key'],
+    ]);
+    unset($GLOBALS['styled_runtime_source_icon_map']['panel:' . $codePanel]);
+    return $saved;
+}
+
+function deletePanelEmojiMapping($codePanel)
+{
+    global $pdo;
+
+    $codePanel = trim((string) $codePanel);
+    if ($codePanel === '') {
+        return true;
+    }
+
+    $stmt = $pdo->prepare("DELETE FROM styled_button_icons
+        WHERE source_type IN ('panel', 'marzban_panel') AND source_key = :source_key");
+    $deleted = $stmt->execute(['source_key' => $codePanel]);
+    unset(
+        $GLOBALS['styled_runtime_source_icon_map']['panel:' . $codePanel],
+        $GLOBALS['styled_runtime_source_icon_map']['marzban_panel:' . $codePanel]
+    );
+    return $deleted;
+}
+
+function generateUniquePanelCode($bytes = 2)
+{
+    global $pdo;
+
+    $bytes = max(2, (int) $bytes);
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = :code_panel");
+    for ($attempt = 0; $attempt < 10; $attempt++) {
+        $codePanel = bin2hex(random_bytes($bytes));
+        $stmt->execute(['code_panel' => $codePanel]);
+        if ((int) $stmt->fetchColumn() === 0) {
+            return $codePanel;
+        }
+    }
+
+    throw new RuntimeException('Unable to allocate a unique panel code.');
+}
+
 function saveProductEmojiMapping($codeProduct, $emojiKey)
 {
     global $pdo;

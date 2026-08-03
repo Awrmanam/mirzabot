@@ -959,7 +959,10 @@ function buildStyledPanelButton(array $panel, array $action)
 {
     $codePanel = (string) ($panel['code_panel'] ?? '');
     $namePanel = normalizePanelLookupLabel($panel['name_panel'] ?? '');
-    $iconKey = styledButtonIconKeyForSource('marzban_panel', $codePanel);
+    $iconKey = styledButtonIconKeyForSource('panel', $codePanel);
+    if ($iconKey === '') {
+        $iconKey = styledButtonIconKeyForSource('marzban_panel', $codePanel);
+    }
     return buildStyledButton($namePanel, $action, $iconKey);
 }
 

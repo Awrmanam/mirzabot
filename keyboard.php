@@ -12,6 +12,17 @@ if (!function_exists('getPaySettingValue')) {
         return $result['ValuePay'] ?? null;
     }
 }
+if (!function_exists('panelKeyboardButton')) {
+    function panelKeyboardButton(array $panel, array $action = [])
+    {
+        if (function_exists('buildStyledPanelButton')) {
+            return buildStyledPanelButton($panel, $action);
+        }
+        return array_merge([
+            'text' => normalizePanelLookupLabel($panel['name_panel'] ?? ''),
+        ], $action);
+    }
+}
 //-----------------------------[  text panel  ]-------------------------------
 $stmt = $pdo->prepare("SHOW TABLES LIKE 'textbot'");
 $stmt->execute();
@@ -509,15 +520,15 @@ if ($table_exists) {
     $stmt = $pdo->prepare("SELECT * FROM marzban_panel");
     $stmt->execute();
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $namepanel[] = [$row['name_panel']];
+        $namepanel[] = $row;
     }
     $list_marzban_panel = [
         'keyboard' => [],
         'resize_keyboard' => true,
     ];
-    foreach ($namepanel as $button) {
+    foreach ($namepanel as $panel) {
         $list_marzban_panel['keyboard'][] = [
-            ['text' => $button[0]]
+            panelKeyboardButton($panel)
         ];
     }
         $list_marzban_panel['keyboard'][] = [
@@ -532,9 +543,7 @@ if ($table_exists) {
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $action = ['callback_data' => 'locationedit_' . $row['code_panel']];
         $list_marzban_panel_edit_product['inline_keyboard'][] = [
-            function_exists('buildStyledPanelButton')
-                ? buildStyledPanelButton($row, $action)
-                : array_merge(['text' => normalizePanelLookupLabel($row['name_panel'])], $action)
+            panelKeyboardButton($row, $action)
         ];
     }
     $list_marzban_panel_edit_product['inline_keyboard'][] = [['text' =>"همه پنل ها",'callback_data' => 'locationedit_all']];
@@ -689,9 +698,9 @@ $json_list_remove_helpـlink = json_encode($helpappremove);
             if(intval($configexits) == 0)continue;
         }
         if ($users['step'] == "getusernameinfo") {
-            $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "locationnotuser_{$result['code_panel']}"];
+            $temp_row[] = panelKeyboardButton($result, ['callback_data' => "locationnotuser_{$result['code_panel']}"]);
         } else {
-            $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "location_{$result['code_panel']}"];
+            $temp_row[] = panelKeyboardButton($result, ['callback_data' => "location_{$result['code_panel']}"]);
         }
          if (count($temp_row) == 2) {
             $list_marzban_panel_users['inline_keyboard'][] = $temp_row;
@@ -713,11 +722,11 @@ $json_list_remove_helpـlink = json_encode($helpappremove);
         if($result['hide_user'] != null and in_array($from_id,json_decode($result['hide_user'],true)))continue;
         if ($users['step'] == "getusernameinfo") {
             $list_marzban_panel_users['inline_keyboard'][] = [
-                ['text' => $result['name_panel'], 'callback_data' => "locationnotuser_{$result['code_panel']}"]
+                panelKeyboardButton($result, ['callback_data' => "locationnotuser_{$result['code_panel']}"])
             ];
         }
         else{
-            $list_marzban_panel_users['inline_keyboard'][] = [['text' => $result['name_panel'], 'callback_data' => "location_{$result['code_panel']}"]
+            $list_marzban_panel_users['inline_keyboard'][] = [panelKeyboardButton($result, ['callback_data' => "location_{$result['code_panel']}"])
             ];
         }
     }
@@ -744,7 +753,7 @@ $list_marzban_panel_user = json_encode($list_marzban_panel_users);
     $list_marzban_panel_users_om = ['inline_keyboard' => []];
     while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
         if($result['hide_user'] != null and in_array($from_id,json_decode($result['hide_user'],true)))continue;
-            $list_marzban_panel_users_om['inline_keyboard'][] = [['text' => $result['name_panel'], 'callback_data' => "locationom_{$result['code_panel']}"]
+            $list_marzban_panel_users_om['inline_keyboard'][] = [panelKeyboardButton($result, ['callback_data' => "locationom_{$result['code_panel']}"])
             ];
     }
 $list_marzban_panel_users_om['inline_keyboard'][] = [
@@ -762,7 +771,7 @@ $list_marzban_panel_userom = json_encode($list_marzban_panel_users_om);
         while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
         if ($result['hide_user'] != null && in_array($from_id, json_decode($result['hide_user'], true))) continue;
     
-            $temp_row[] = ['text' => $result['name_panel'], 'callback_data' => "changelocselectlo-{$result['code_panel']}"];
+            $temp_row[] = panelKeyboardButton($result, ['callback_data' => "changelocselectlo-{$result['code_panel']}"]);
         if (count($temp_row) == 2) {
             $list_marzban_panel_users_change['inline_keyboard'][] = $temp_row;
             $temp_row = [];
@@ -774,7 +783,7 @@ if (!empty($temp_row)) {
     }else{
     while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
         if($result['hide_user'] != null and in_array($from_id,json_decode($result['hide_user'],true)))continue;
-            $list_marzban_panel_users_change['inline_keyboard'][] = [['text' => $result['name_panel'], 'callback_data' => "changelocselectlo-{$result['code_panel']}"]
+            $list_marzban_panel_users_change['inline_keyboard'][] = [panelKeyboardButton($result, ['callback_data' => "changelocselectlo-{$result['code_panel']}"])
             ];
     }
     }
@@ -790,7 +799,7 @@ $list_marzban_panel_userschange = json_encode($list_marzban_panel_users_change);
     $list_marzban_panel_usertest = ['inline_keyboard' => []];
     while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
         if($result['hide_user'] != null and in_array($from_id,json_decode($result['hide_user'],true)))continue;
-            $list_marzban_panel_usertest['inline_keyboard'][] = [['text' => $result['name_panel'], 'callback_data' => "locationtest_{$result['code_panel']}"]
+            $list_marzban_panel_usertest['inline_keyboard'][] = [panelKeyboardButton($result, ['callback_data' => "locationtest_{$result['code_panel']}"])
             ];
     }
 $list_marzban_panel_usertest['inline_keyboard'][] = [

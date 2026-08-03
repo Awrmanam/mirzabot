@@ -27,8 +27,9 @@ assertStatic(strpos($admin, "preg_match('/^productdelete_([0-9]+)\$/', \$datain"
 assertStatic(strpos($admin, 'DELETE FROM product WHERE id = :product_id') !== false, 'Product deletion SQL is not ID-based.');
 assertStatic(strpos($admin, 'UPDATE product SET name_product = :name_products WHERE id = :product_id') !== false, 'Product editing is not ID-based.');
 assertStatic(strpos($admin, 'update("product", "Location", $text, "Location", $user[\'Processing_value\'])') === false, 'Panel rename still rewrites product locations by display name.');
-assertStatic(substr_count($admin, 'containsLiteralPremiumEmojiToken(') >= 3, 'Panel and final-storage token guards are incomplete.');
+assertStatic(substr_count($admin, 'containsLiteralPremiumEmojiToken(') >= 1, 'Final product-storage token guard is missing.');
 assertStatic(substr_count($admin, 'extractProductEmojiToken(') >= 2, 'Product create/edit token extraction is not connected.');
+assertStatic(substr_count($admin, 'extractPanelEmojiToken(') >= 2, 'Panel create/edit token extraction is not connected.');
 
 assertStatic(strpos($identity, "foreach (['code_panel', 'name_panel'] as \$column)") !== false, 'Compatibility resolver order is not code_panel then name_panel.');
 assertStatic(strpos($identity, 'normalizePanelLookupLabel') !== false, 'Legacy visible-label normalization is missing.');

@@ -822,16 +822,19 @@ $paycount
     deletemessage($from_id, $message_id);
     savedata("clear", "type", $typepanel);
 } elseif ($user['step'] == "add_name_panel") {
-    if (containsLiteralPremiumEmojiToken($text)) {
-        sendmessage($from_id, "❌ نام پنل باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+    $panelNameInput = extractPanelEmojiToken($text);
+    if (!$panelNameInput['ok']) {
+        sendmessage($from_id, panelEmojiValidationMessage($panelNameInput), $backadmin, 'HTML');
         return;
     }
-    if (in_array($text, $marzban_list)) {
+    $plainPanelName = $panelNameInput['name_panel'];
+    if (in_array($plainPanelName, $marzban_list)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
         return;
     }
     $userdata = json_decode($user['Processing_value'], true);
-    savedata("save", "namepanel", $text);
+    savedata("save", "namepanel", $plainPanelName);
+    savedata("save", "panel_emoji_key", $panelNameInput['emoji_key']);
     if ($userdata['type'] == "Manualsale") {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['getlimitedpanel'], $backadmin, 'HTML');
         step('getlimitedpanel', $from_id);
@@ -874,9 +877,18 @@ $paycount
 } elseif ($user['step'] == "getlimitedpanel") {
     savedata("save", "limitpanel", $text);
     $userdata = json_decode($user['Processing_value'], true);
+    $panelEmojiKey = trim((string) ($userdata['panel_emoji_key'] ?? ''));
+    if ($panelEmojiKey !== '') {
+        $emojiValidation = validateProductEmojiKey($panelEmojiKey);
+        if (!$emojiValidation['ok']) {
+            sendmessage($from_id, panelEmojiValidationMessage($emojiValidation), $backadmin, 'HTML');
+            return;
+        }
+        $panelEmojiKey = $emojiValidation['emoji_key'];
+    }
     $database_panel_type = $userdata['type'] == "rebecca" ? "marzban" : $userdata['type'];
     $database_panel_version = $userdata['type'] == "rebecca" ? "2" : "0";
-    $randomString = bin2hex(random_bytes(2));
+    $randomString = generateUniquePanelCode(2);
     if ($userdata['type'] == "x-ui_single" || $userdata['type'] == "alireza") {
         $marzbanprotocol = $randomString;
         $protocols = "vmess";
@@ -968,7 +980,25 @@ $paycount
     $stmt->bindParam(':customvolume', $VALUE);
     $stmt->bindParam(':on_hold_test', $stauts_on_holed);
     $stmt->bindParam(':version_panel', $database_panel_version);
-    $stmt->execute();
+    try {
+        $pdo->beginTransaction();
+        $stmt->execute();
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Panel insert did not create exactly one row.');
+        }
+        if ($panelEmojiKey !== '' && !savePanelEmojiMapping($randomString, $panelEmojiKey)) {
+            throw new RuntimeException('Panel emoji mapping was not saved.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Panel Emoji] create failed for generated panel code');
+        sendmessage($from_id, "❌ پنل ذخیره نشد؛ لطفاً دوباره تلاش کنید.", $keyboardadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addedpanel'], $keyboardadmin, 'HTML');
     sendmessage($from_id, "🥳", $keyboardadmin, 'HTML');
     step("home", $from_id);
@@ -1115,7 +1145,7 @@ elseif ($datain == "systemsms") {
         $list_panel['inline_keyboard'][] = [['text' => "تمامی پنل ها", 'callback_data' => 'locationmessage_all']];
         while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $list_panel['inline_keyboard'][] = [
-                ['text' => $result['name_panel'], 'callback_data' => "locationmessage_{$result['code_panel']}"]
+                buildStyledPanelButton($result, ['callback_data' => "locationmessage_{$result['code_panel']}"])
             ];
         }
         $list_panel['inline_keyboard'][] = [['text' => "بازگشت به منوی قبل", 'callback_data' => 'typeusermessage-' . $userdata['typeusermessage']],];
@@ -4642,20 +4672,50 @@ $text_expie_agent
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['GetNameNew'], $backadmin, 'HTML');
     step('GetNameNew', $from_id);
 } elseif ($user['step'] == "GetNameNew") {
-    if (containsLiteralPremiumEmojiToken($text)) {
-        sendmessage($from_id, "❌ نام پنل باید متن ساده باشد. ایموجی پریمیوم را از منوی شخصی‌سازی ظاهر تنظیم کنید.", $backadmin, 'HTML');
+    $panelNameInput = extractPanelEmojiToken($text);
+    if (!$panelNameInput['ok']) {
+        sendmessage($from_id, panelEmojiValidationMessage($panelNameInput), $backadmin, 'HTML');
         return;
     }
-    if (in_array($text, $marzban_list)) {
+    $plainPanelName = $panelNameInput['name_panel'];
+    $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select", ['cache' => false]);
+    if (!$panel) {
+        sendmessage($from_id, "❌ پنل انتخابی دیگر وجود ندارد.", $keyboardadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    if ($panel['name_panel'] !== $plainPanelName && in_array($plainPanelName, $marzban_list)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Repeatpanel'], $backadmin, 'HTML');
         return;
     }
-    $typepanel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
-    outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedNmaePanel']);
-    update("user", "Processing_value", $text, "id", $from_id);
-    update("marzban_panel", "name_panel", $text, "name_panel", $user['Processing_value']);
-    update("invoice", "Service_location", $text, "Service_location", $user['Processing_value']);
-    update("user", "Processing_value", $text, "id", $from_id);
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("UPDATE marzban_panel SET name_panel = :name_panel WHERE id = :panel_id");
+        $stmt->execute([
+            'name_panel' => $plainPanelName,
+            'panel_id' => (int) $panel['id'],
+        ]);
+        $stmt = $pdo->prepare("UPDATE invoice SET Service_location = :new_name WHERE Service_location = :old_name");
+        $stmt->execute([
+            'new_name' => $plainPanelName,
+            'old_name' => $panel['name_panel'],
+        ]);
+        if ($panelNameInput['emoji_key'] !== ''
+            && !savePanelEmojiMapping($panel['code_panel'], $panelNameInput['emoji_key'])) {
+            throw new RuntimeException('Panel emoji mapping update failed.');
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[Panel Emoji] rename failed for panel id ' . (int) $panel['id']);
+        sendmessage($from_id, "❌ نام پنل بروزرسانی نشد؛ لطفاً دوباره تلاش کنید.", $keyboardadmin, 'HTML');
+        step('home', $from_id);
+        return;
+    }
+    update("user", "Processing_value", $plainPanelName, "id", $from_id);
+    outtypepanel($panel['type'], $textbotlang['Admin']['managepanel']['ChangedNmaePanel']);
     step('home', $from_id);
 } elseif ($text == "🔗 ویرایش آدرس پنل" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['geturlnew'], $backadmin, 'HTML');
@@ -4798,11 +4858,34 @@ $text_expie_agent
     step('confirmremovepanel', $from_id);
 } elseif ($user['step'] == "confirmremovepanel") {
     if ($text == "تایید") {
+        $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select", ['cache' => false]);
+        if (!$panel) {
+            sendmessage($from_id, "❌ پنل انتخابی دیگر وجود ندارد.", $keyboardadmin, 'HTML');
+            step('home', $from_id);
+            return;
+        }
+        try {
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE id = :panel_id");
+            $stmt->bindValue(':panel_id', (int) $panel['id'], PDO::PARAM_INT);
+            $stmt->execute();
+            if ($stmt->rowCount() !== 1) {
+                throw new RuntimeException('Panel delete did not remove exactly one row.');
+            }
+            if (!deletePanelEmojiMapping($panel['code_panel'])) {
+                throw new RuntimeException('Panel emoji mapping cleanup failed.');
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[Panel Emoji] delete failed for panel id ' . (int) $panel['id']);
+            sendmessage($from_id, "❌ پنل حذف نشد؛ لطفاً دوباره تلاش کنید.", $keyboardadmin, 'HTML');
+            step('home', $from_id);
+            return;
+        }
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], $keyboardadmin, 'HTML');
-        $marzban = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
-        $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE name_panel = :name_panel");
-        $stmt->bindParam(':name_panel', $user['Processing_value'], PDO::PARAM_STR);
-        $stmt->execute();
     }
     step('home', $from_id);
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managruser'] || $datain == "backlistuser") {
