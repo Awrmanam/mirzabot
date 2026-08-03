@@ -23,6 +23,29 @@ if (!function_exists('panelKeyboardButton')) {
         ], $action);
     }
 }
+if (!function_exists('panelAdminSelectionKeyboard')) {
+    function panelAdminSelectionKeyboard($callbackPrefix)
+    {
+        global $pdo, $textbotlang;
+
+        $stmt = $pdo->query("SELECT * FROM marzban_panel ORDER BY id");
+        $keyboard = ['inline_keyboard' => []];
+        while ($panel = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $callbackData = (string) $callbackPrefix . (string) $panel['code_panel'];
+            if (strlen($callbackData) > 64) {
+                continue;
+            }
+            $keyboard['inline_keyboard'][] = [
+                panelKeyboardButton($panel, ['callback_data' => $callbackData]),
+            ];
+        }
+        $keyboard['inline_keyboard'][] = [[
+            'text' => $textbotlang['Admin']['backadmin'],
+            'callback_data' => 'panel_manage_back',
+        ]];
+        return json_encode($keyboard, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+}
 //-----------------------------[  text panel  ]-------------------------------
 $stmt = $pdo->prepare("SHOW TABLES LIKE 'textbot'");
 $stmt->execute();

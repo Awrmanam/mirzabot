@@ -50,6 +50,9 @@ if (in_array($text, $textadmin) || $datain == "admin") {
         sendmessage($from_id, $miniAppInstructionText, $miniAppInstructionKeyboard, 'HTML');
     }
 } elseif ($text == $textbotlang['Admin']['backadmin']) {
+    if (in_array($user['step'], ['panel_delete_select', 'confirmremovepanel'], true)) {
+        update("user", "Processing_value_one", "", "id", $from_id);
+    }
     if ($buyreport == "0" || $otherservice == "0" || $otherreport == "0" || $paymentreports == "0" || $reporttest == "0" || $errorreport == "0") {
         sendmessage($from_id, $textbotlang['Admin']['activebottext'], $active_panell, 'HTML');
         return;
@@ -71,6 +74,9 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     Editmessagetext($from_id, $message_id, $confirmationText, $confirmationKeyboard, 'HTML');
     return;
 } elseif ($text == $textbotlang['Admin']['backmenu']) {
+    if (in_array($user['step'], ['panel_delete_select', 'confirmremovepanel'], true)) {
+        update("user", "Processing_value_one", "", "id", $from_id);
+    }
     if ($buyreport == "0" || $otherservice == "0" || $otherreport == "0" || $paymentreports == "0" || $reporttest == "0" || $errorreport == "0") {
         sendmessage($from_id, $textbotlang['Admin']['activebottext'], $setting_panel, 'HTML');
         return;
@@ -86,6 +92,11 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     } else {
         sendmessage($from_id, $textbotlang['Admin']['Back-Admin'], $keyboardadmin, 'HTML');
     }
+    return;
+} elseif ($datain == 'panel_manage_back') {
+    update("user", "Processing_value_one", "", "id", $from_id);
+    step('home', $from_id);
+    sendmessage($from_id, $textbotlang['Admin']['Back-Admin'], $keyboardadmin, 'HTML');
     return;
 } elseif ($text == $textbotlang['Admin']['channel']['title'] && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['channel']['changechannel'], $backadmin, 'HTML');
@@ -4466,10 +4477,31 @@ $text_expie_agent
     update("PaySetting", "ValuePay", $text, "NamePay", "merchant_zarinpal");
     step('home', $from_id);
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managementpanel'] && $adminrulecheck['rule'] == "administrator") {
-    sendmessage($from_id, $textbotlang['Admin']['managepanel']['getloc'], $json_list_marzban_panel, 'HTML');
+    sendmessage(
+        $from_id,
+        $textbotlang['Admin']['managepanel']['getloc'],
+        panelAdminSelectionKeyboard('panel_manage_select:'),
+        'HTML'
+    );
     step('GetLocationEdit', $from_id);
 } elseif ($user['step'] == "GetLocationEdit") {
-    $marzban_list_get = select("marzban_panel", "*", "name_panel", $text, "select");
+    if (preg_match('/^panel_manage_select:([A-Za-z0-9_-]{1,40})$/', $datain, $panelSelection)) {
+        $panelSelectionValue = $panelSelection[1];
+    } else {
+        $panelSelectionValue = trim((string) $text);
+    }
+    $marzban_list_get = resolvePanelDeletionSelection($panelSelectionValue);
+    if (!$marzban_list_get) {
+        sendmessage(
+            $from_id,
+            "❌ پنل انتخابی دیگر وجود ندارد.",
+            panelAdminSelectionKeyboard('panel_manage_select:'),
+            'HTML'
+        );
+        step('GetLocationEdit', $from_id);
+        return;
+    }
+    $text = (string) $marzban_list_get['name_panel'];
     if ($marzban_list_get['type'] == "marzban") {
         $Check_token = token_panel($marzban_list_get['code_panel'], false);
         if (isset($Check_token['access_token'])) {
@@ -4666,7 +4698,8 @@ $text_expie_agent
     } else {
         sendmessage($from_id, "یک گزینه را انتخاب نمایید", $optionMarzban, 'HTML');
     }
-    update("user", "Processing_value", $text, "id", $from_id);
+    update("user", "Processing_value", $marzban_list_get['name_panel'], "id", $from_id);
+    update("user", "Processing_value_one", $marzban_list_get['code_panel'], "id", $from_id);
     step('home', $from_id);
 } elseif ($text == "✍️ نام پنل" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['GetNameNew'], $backadmin, 'HTML');
@@ -4678,7 +4711,11 @@ $text_expie_agent
         return;
     }
     $plainPanelName = $panelNameInput['name_panel'];
-    $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select", ['cache' => false]);
+    $panelSelectionValue = trim((string) ($user['Processing_value_one'] ?? ''));
+    if ($panelSelectionValue === '') {
+        $panelSelectionValue = $user['Processing_value'];
+    }
+    $panel = resolvePanelDeletionSelection($panelSelectionValue);
     if (!$panel) {
         sendmessage($from_id, "❌ پنل انتخابی دیگر وجود ندارد.", $keyboardadmin, 'HTML');
         step('home', $from_id);
@@ -4715,6 +4752,7 @@ $text_expie_agent
         return;
     }
     update("user", "Processing_value", $plainPanelName, "id", $from_id);
+    update("user", "Processing_value_one", $panel['code_panel'], "id", $from_id);
     outtypepanel($panel['type'], $textbotlang['Admin']['managepanel']['ChangedNmaePanel']);
     step('home', $from_id);
 } elseif ($text == "🔗 ویرایش آدرس پنل" && $adminrulecheck['rule'] == "administrator") {
@@ -4853,41 +4891,106 @@ $text_expie_agent
     update("marzban_panel", "datelogin", null, "name_panel", $user['Processing_value']);
     step('home', $from_id);
 } elseif ($text == "❌ حذف پنل" && $adminrulecheck['rule'] == "administrator") {
-    sendmessage($from_id, "در صورت تایید کلمه زیر را ارسال کنید.
-<code>تایید</code>", $backadmin, 'HTML');
+    $storedPanelSelection = trim((string) ($user['Processing_value_one'] ?? ''));
+    if ($storedPanelSelection === '') {
+        $storedPanelSelection = trim((string) ($user['Processing_value'] ?? ''));
+    }
+    $panel = resolvePanelDeletionSelection($storedPanelSelection);
+    if (!$panel) {
+        update("user", "Processing_value_one", "", "id", $from_id);
+        sendmessage(
+            $from_id,
+            "📌 پنلی که می‌خواهید حذف شود را انتخاب کنید.",
+            panelAdminSelectionKeyboard('panel_delete_select:'),
+            'HTML'
+        );
+        step('panel_delete_select', $from_id);
+        return;
+    }
+    update("user", "Processing_value_one", $panel['code_panel'], "id", $from_id);
+    sendmessage(
+        $from_id,
+        "برای حذف پنل <b>" . htmlspecialchars($panel['name_panel'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</b> کلمه زیر را ارسال کنید.\n<code>تایید</code>",
+        $backadmin,
+        'HTML'
+    );
+    step('confirmremovepanel', $from_id);
+} elseif ($user['step'] == "panel_delete_select") {
+    if (!preg_match('/^panel_delete_select:([A-Za-z0-9_-]{1,40})$/', $datain, $panelDeleteSelection)) {
+        update("user", "Processing_value_one", "", "id", $from_id);
+        sendmessage($from_id, "❌ انتخاب پنل نامعتبر است.", panelAdminSelectionKeyboard('panel_delete_select:'), 'HTML');
+        return;
+    }
+    $panel = resolvePanelDeletionSelection($panelDeleteSelection[1]);
+    if (!$panel || $panel['resolved_from'] !== 'code_panel') {
+        update("user", "Processing_value_one", "", "id", $from_id);
+        sendmessage($from_id, "❌ پنل انتخابی دیگر وجود ندارد.", panelAdminSelectionKeyboard('panel_manage_select:'), 'HTML');
+        step('GetLocationEdit', $from_id);
+        return;
+    }
+    update("user", "Processing_value_one", $panel['code_panel'], "id", $from_id);
+    sendmessage(
+        $from_id,
+        "برای حذف پنل <b>" . htmlspecialchars($panel['name_panel'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</b> کلمه زیر را ارسال کنید.\n<code>تایید</code>",
+        $backadmin,
+        'HTML'
+    );
     step('confirmremovepanel', $from_id);
 } elseif ($user['step'] == "confirmremovepanel") {
     if ($text == "تایید") {
-        $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select", ['cache' => false]);
+        $storedPanelSelection = trim((string) ($user['Processing_value_one'] ?? ''));
+        if ($storedPanelSelection === '') {
+            $storedPanelSelection = trim((string) ($user['Processing_value'] ?? ''));
+        }
+        $panel = resolvePanelDeletionSelection($storedPanelSelection);
         if (!$panel) {
-            sendmessage($from_id, "❌ پنل انتخابی دیگر وجود ندارد.", $keyboardadmin, 'HTML');
-            step('home', $from_id);
+            update("user", "Processing_value", "", "id", $from_id);
+            update("user", "Processing_value_one", "", "id", $from_id);
+            sendmessage($from_id, "❌ پنل انتخابی دیگر وجود ندارد.", panelAdminSelectionKeyboard('panel_manage_select:'), 'HTML');
+            step('GetLocationEdit', $from_id);
             return;
         }
-        try {
-            $pdo->beginTransaction();
-            $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE id = :panel_id");
-            $stmt->bindValue(':panel_id', (int) $panel['id'], PDO::PARAM_INT);
-            $stmt->execute();
-            if ($stmt->rowCount() !== 1) {
-                throw new RuntimeException('Panel delete did not remove exactly one row.');
+        if ($panel['resolved_from'] === 'name_panel') {
+            update("user", "Processing_value_one", $panel['code_panel'], "id", $from_id);
+        }
+        $deleteResult = deletePanelByCode($panel['code_panel']);
+        update("user", "Processing_value_one", "", "id", $from_id);
+        if ($deleteResult['status'] === 'has_products') {
+            $productNames = [];
+            foreach (array_slice($deleteResult['products'], 0, 10) as $dependentProduct) {
+                $productNames[] = '• ' . htmlspecialchars($dependentProduct['name_product'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
             }
-            if (!deletePanelEmojiMapping($panel['code_panel'])) {
-                throw new RuntimeException('Panel emoji mapping cleanup failed.');
+            $remainingCount = count($deleteResult['products']) - count($productNames);
+            if ($remainingCount > 0) {
+                $productNames[] = "• و {$remainingCount} محصول دیگر";
             }
-            $pdo->commit();
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            error_log('[Panel Emoji] delete failed for panel id ' . (int) $panel['id']);
-            sendmessage($from_id, "❌ پنل حذف نشد؛ لطفاً دوباره تلاش کنید.", $keyboardadmin, 'HTML');
-            step('home', $from_id);
+            sendmessage(
+                $from_id,
+                "❌ این پنل حذف نشد؛ محصولات زیر هنوز به آن متصل هستند:\n" . implode("\n", $productNames),
+                panelAdminSelectionKeyboard('panel_manage_select:'),
+                'HTML'
+            );
+            step('GetLocationEdit', $from_id);
             return;
         }
-        sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], $keyboardadmin, 'HTML');
+        if ($deleteResult['status'] !== 'deleted') {
+            if ($deleteResult['status'] === 'not_found') {
+                update("user", "Processing_value", "", "id", $from_id);
+                $message = "❌ پنل انتخابی دیگر وجود ندارد.";
+            } else {
+                $message = "❌ پنل حذف نشد؛ لطفاً دوباره تلاش کنید.";
+            }
+            sendmessage($from_id, $message, panelAdminSelectionKeyboard('panel_manage_select:'), 'HTML');
+            step('GetLocationEdit', $from_id);
+            return;
+        }
+        update("user", "Processing_value", "", "id", $from_id);
+        sendmessage($from_id, $textbotlang['Admin']['managepanel']['RemovedPanel'], panelAdminSelectionKeyboard('panel_manage_select:'), 'HTML');
+        step('GetLocationEdit', $from_id);
+        return;
     }
-    step('home', $from_id);
+    sendmessage($from_id, "❌ برای حذف پنل باید کلمه <code>تایید</code> را ارسال کنید.", $backadmin, 'HTML');
+    return;
 } elseif ($text == $textbotlang['Admin']['btnkeyboardadmin']['managruser'] || $datain == "backlistuser") {
     $keyboardtypelistuser = json_encode([
         'inline_keyboard' => [

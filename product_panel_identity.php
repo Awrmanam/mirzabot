@@ -179,6 +179,81 @@ function generateUniquePanelCode($bytes = 2)
     throw new RuntimeException('Unable to allocate a unique panel code.');
 }
 
+function resolvePanelDeletionSelection($storedValue)
+{
+    global $pdo;
+
+    $storedValue = trim((string) $storedValue);
+    if ($storedValue === '') {
+        return null;
+    }
+
+    foreach (['code_panel', 'name_panel'] as $column) {
+        $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE {$column} = :panel_value LIMIT 2");
+        $stmt->execute(['panel_value' => $storedValue]);
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($matches) === 1) {
+            $matches[0]['resolved_from'] = $column;
+            return $matches[0];
+        }
+        if (count($matches) > 1) {
+            return null;
+        }
+    }
+
+    return null;
+}
+
+function deletePanelByCode($codePanel)
+{
+    global $pdo;
+
+    $codePanel = trim((string) $codePanel);
+    if ($codePanel === '') {
+        return ['status' => 'not_found', 'panel' => null, 'products' => []];
+    }
+
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE code_panel = :code_panel LIMIT 2 FOR UPDATE");
+        $stmt->execute(['code_panel' => $codePanel]);
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (count($matches) !== 1) {
+            $pdo->rollBack();
+            return ['status' => 'not_found', 'panel' => null, 'products' => []];
+        }
+        $panel = $matches[0];
+
+        $stmt = $pdo->prepare("SELECT id, name_product, code_product FROM product
+            WHERE Location = :panel_code OR Location = :panel_name ORDER BY id");
+        $stmt->execute([
+            'panel_code' => $panel['code_panel'],
+            'panel_name' => $panel['name_panel'],
+        ]);
+        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($products) {
+            $pdo->rollBack();
+            return ['status' => 'has_products', 'panel' => $panel, 'products' => $products];
+        }
+
+        $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE code_panel = :code_panel");
+        $stmt->execute(['code_panel' => $panel['code_panel']]);
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException('Panel delete did not remove exactly one row.');
+        }
+        if (!deletePanelEmojiMapping($panel['code_panel'])) {
+            throw new RuntimeException('Panel emoji mapping cleanup failed.');
+        }
+        $pdo->commit();
+        return ['status' => 'deleted', 'panel' => $panel, 'products' => []];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['status' => 'failed', 'panel' => null, 'products' => []];
+    }
+}
+
 function saveProductEmojiMapping($codeProduct, $emojiKey)
 {
     global $pdo;
