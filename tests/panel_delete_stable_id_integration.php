@@ -98,7 +98,8 @@ try {
     $pdo->prepare("INSERT INTO product (name_product, code_product, Location)
         VALUES ('Dependent Plan', 'product_dependent', 'panel_promax')")->execute();
     $blocked = deletePanelByCode('panel_promax');
-    panelDeleteAssert($blocked['status'] === 'has_products', 'Deletion did not block a code_panel-dependent product.');
+    panelDeleteAssert($blocked['status'] === 'has_exact_products', 'Deletion did not block a code_panel-dependent product.');
+    panelDeleteAssert(count($blocked['exact_code_dependencies']) === 1, 'Exact dependency category is incomplete.');
     panelDeleteAssert(count($blocked['products']) === 1, 'Dependent product list is incomplete.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_promax'")->fetchColumn() === 1, 'Blocked deletion removed the panel.');
 
@@ -106,7 +107,8 @@ try {
     $pdo->prepare("INSERT INTO product (name_product, code_product, Location)
         VALUES ('Legacy Dependent Plan', 'product_legacy_dependent', 'Promax')")->execute();
     $legacyBlocked = deletePanelByCode('panel_promax');
-    panelDeleteAssert($legacyBlocked['status'] === 'has_products', 'Deletion did not block an exact legacy name_panel-dependent product.');
+    panelDeleteAssert($legacyBlocked['status'] === 'has_unique_legacy_products', 'Deletion did not block an exact legacy name_panel-dependent product.');
+    panelDeleteAssert(count($legacyBlocked['unique_legacy_name_dependencies']) === 1, 'Unique legacy dependency category is incomplete.');
     panelDeleteAssert(count($legacyBlocked['products']) === 1, 'Legacy dependent product list is incomplete.');
     panelDeleteAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_promax'")->fetchColumn() === 1, 'Legacy dependency block removed the panel.');
 

@@ -292,22 +292,63 @@ function resolveAdminPanelState(array $user)
     return null;
 }
 
-function panelDeletionPreviewByCode($codePanel)
+function emptyPanelDeletionDependencies()
+{
+    return [
+        'same_name_panel_count' => 0,
+        'another_same_name_panel_remains' => false,
+        'exact_code_dependencies' => [],
+        'ambiguous_legacy_name_dependencies' => [],
+        'unique_legacy_name_dependencies' => [],
+    ];
+}
+
+function panelDeletionDependencies(array $panel, $lockRows = false)
 {
     global $pdo;
 
+    $lockClause = $lockRows ? ' FOR UPDATE' : '';
+    $stmt = $pdo->prepare("SELECT code_panel FROM marzban_panel
+        WHERE name_panel = :panel_name ORDER BY id{$lockClause}");
+    $stmt->execute(['panel_name' => $panel['name_panel']]);
+    $sameNamePanels = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $sameNamePanelCount = count($sameNamePanels);
+
+    $stmt = $pdo->prepare("SELECT id, name_product, code_product, Location FROM product
+        WHERE Location = :panel_code ORDER BY id{$lockClause}");
+    $stmt->execute(['panel_code' => $panel['code_panel']]);
+    $exactCodeDependencies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $legacyNameDependencies = [];
+    if ((string) $panel['name_panel'] !== (string) $panel['code_panel']) {
+        $stmt = $pdo->prepare("SELECT id, name_product, code_product, Location FROM product
+            WHERE Location = :panel_name ORDER BY id{$lockClause}");
+        $stmt->execute(['panel_name' => $panel['name_panel']]);
+        $legacyNameDependencies = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    return [
+        'same_name_panel_count' => $sameNamePanelCount,
+        'another_same_name_panel_remains' => $sameNamePanelCount > 1,
+        'exact_code_dependencies' => $exactCodeDependencies,
+        'ambiguous_legacy_name_dependencies' => $sameNamePanelCount > 1 ? $legacyNameDependencies : [],
+        'unique_legacy_name_dependencies' => $sameNamePanelCount === 1 ? $legacyNameDependencies : [],
+    ];
+}
+
+function panelDeletionPreviewByCode($codePanel)
+{
     $panel = resolvePanelDeletionSelection($codePanel);
     if (!$panel || $panel['resolved_from'] !== 'code_panel') {
         return null;
     }
 
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM product
-        WHERE Location = :panel_code OR Location = :panel_name");
-    $stmt->execute([
-        'panel_code' => $panel['code_panel'],
-        'panel_name' => $panel['name_panel'],
-    ]);
-    $panel['product_count'] = (int) $stmt->fetchColumn();
+    $dependencies = panelDeletionDependencies($panel);
+    $panel = array_merge($panel, $dependencies);
+    $panel['exact_product_count'] = count($dependencies['exact_code_dependencies']);
+    $panel['ambiguous_legacy_product_count'] = count($dependencies['ambiguous_legacy_name_dependencies']);
+    $panel['unique_legacy_product_count'] = count($dependencies['unique_legacy_name_dependencies']);
+    $panel['product_count'] = $panel['exact_product_count'] + $panel['unique_legacy_product_count'];
     return $panel;
 }
 
@@ -317,7 +358,10 @@ function deletePanelByCode($codePanel)
 
     $codePanel = trim((string) $codePanel);
     if ($codePanel === '') {
-        return ['status' => 'not_found', 'panel' => null, 'products' => [], 'affected_rows' => 0];
+        return array_merge(
+            ['status' => 'not_found', 'panel' => null, 'products' => [], 'affected_rows' => 0],
+            emptyPanelDeletionDependencies()
+        );
     }
 
     try {
@@ -327,24 +371,38 @@ function deletePanelByCode($codePanel)
         $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (count($matches) === 0) {
             $pdo->rollBack();
-            return ['status' => 'not_found', 'panel' => null, 'products' => [], 'affected_rows' => 0];
+            return array_merge(
+                ['status' => 'not_found', 'panel' => null, 'products' => [], 'affected_rows' => 0],
+                emptyPanelDeletionDependencies()
+            );
         }
         if (count($matches) > 1) {
             $pdo->rollBack();
-            return ['status' => 'integrity_error', 'panel' => null, 'products' => [], 'affected_rows' => 0];
+            return array_merge(
+                ['status' => 'integrity_error', 'panel' => null, 'products' => [], 'affected_rows' => 0],
+                emptyPanelDeletionDependencies()
+            );
         }
         $panel = $matches[0];
 
-        $stmt = $pdo->prepare("SELECT id, name_product, code_product FROM product
-            WHERE Location = :panel_code OR Location = :panel_name ORDER BY id");
-        $stmt->execute([
-            'panel_code' => $panel['code_panel'],
-            'panel_name' => $panel['name_panel'],
-        ]);
-        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if ($products) {
+        $dependencies = panelDeletionDependencies($panel, true);
+        if ($dependencies['exact_code_dependencies']) {
             $pdo->rollBack();
-            return ['status' => 'has_products', 'panel' => $panel, 'products' => $products, 'affected_rows' => 0];
+            return array_merge([
+                'status' => 'has_exact_products',
+                'panel' => $panel,
+                'products' => $dependencies['exact_code_dependencies'],
+                'affected_rows' => 0,
+            ], $dependencies);
+        }
+        if ($dependencies['unique_legacy_name_dependencies']) {
+            $pdo->rollBack();
+            return array_merge([
+                'status' => 'has_unique_legacy_products',
+                'panel' => $panel,
+                'products' => $dependencies['unique_legacy_name_dependencies'],
+                'affected_rows' => 0,
+            ], $dependencies);
         }
 
         $stmt = $pdo->prepare("DELETE FROM marzban_panel WHERE code_panel = :code_panel");
@@ -356,11 +414,17 @@ function deletePanelByCode($codePanel)
         ]);
         if ($affectedRows === 0) {
             $pdo->rollBack();
-            return ['status' => 'not_found', 'panel' => $panel, 'products' => [], 'affected_rows' => 0];
+            return array_merge(
+                ['status' => 'not_found', 'panel' => $panel, 'products' => [], 'affected_rows' => 0],
+                $dependencies
+            );
         }
         if ($affectedRows > 1) {
             $pdo->rollBack();
-            return ['status' => 'integrity_error', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows];
+            return array_merge(
+                ['status' => 'integrity_error', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows],
+                $dependencies
+            );
         }
         if (!deleteCanonicalPanelEmojiMapping($panel['code_panel'])) {
             throw new RuntimeException('Panel emoji mapping cleanup failed.');
@@ -369,15 +433,24 @@ function deletePanelByCode($codePanel)
         $stmt->execute(['code_panel' => $panel['code_panel']]);
         if ((int) $stmt->fetchColumn() !== 0) {
             $pdo->rollBack();
-            return ['status' => 'integrity_error', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows];
+            return array_merge(
+                ['status' => 'integrity_error', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows],
+                $dependencies
+            );
         }
         $pdo->commit();
-        return ['status' => 'deleted', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows];
+        return array_merge(
+            ['status' => 'deleted', 'panel' => $panel, 'products' => [], 'affected_rows' => $affectedRows],
+            $dependencies
+        );
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        return ['status' => 'failed', 'panel' => null, 'products' => [], 'affected_rows' => 0];
+        return array_merge(
+            ['status' => 'failed', 'panel' => null, 'products' => [], 'affected_rows' => 0],
+            emptyPanelDeletionDependencies()
+        );
     }
 }
 

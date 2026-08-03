@@ -26,7 +26,8 @@ assertPanelDeleteStatic(strpos($admin, '$legacyPanel = resolveAdminPanelState($u
 assertPanelDeleteStatic(strpos($admin, '$deleteResult = deletePanelByCode($panel[\'code_panel\'])') !== false, 'Confirmation does not delete by resolved code_panel.');
 assertPanelDeleteStatic(substr_count($admin, 'update("user", "Processing_value_tow", "", "id", $from_id)') >= 6, 'Deletion state is not cleared on all exit paths.');
 assertPanelDeleteStatic(strpos($admin, "\$datain == 'panel_manage_back'") !== false, 'Inline back action is missing.');
-assertPanelDeleteStatic(strpos($admin, "\$deleteResult['status'] === 'has_products'") !== false, 'Dependent products are not handled safely.');
+assertPanelDeleteStatic(strpos($admin, "\$deleteResult['status'] === 'has_exact_products'") !== false, 'Exact code dependencies are not handled safely.');
+assertPanelDeleteStatic(strpos($admin, "\$deleteResult['status'] === 'has_unique_legacy_products'") !== false, 'Final unique legacy dependencies are not handled safely.');
 assertPanelDeleteStatic(strpos($admin, "step('panel_delete_select', \$from_id)") !== false, 'Updated panel deletion list is not restored after deletion.');
 
 $codeLookup = strpos($identity, "foreach (['code_panel', 'name_panel'] as \$column)");
@@ -35,7 +36,12 @@ assertPanelDeleteStatic(strpos($identity, '$storedValue = trim((string) $storedV
 assertPanelDeleteStatic(strpos($identity, 'normalizePanelLookupLabel($storedValue)') === false, 'Deletion resolver performs forbidden fuzzy/display normalization.');
 assertPanelDeleteStatic(strpos($identity, 'DELETE FROM marzban_panel WHERE code_panel = :code_panel') !== false, 'DELETE does not use code_panel.');
 assertPanelDeleteStatic(strpos($identity, 'DELETE FROM marzban_panel WHERE name_panel') === false, 'A name_panel DELETE remains in the stable helper.');
-assertPanelDeleteStatic(strpos($identity, 'WHERE Location = :panel_code OR Location = :panel_name') !== false, 'Code and exact legacy-name product dependencies are not checked.');
+assertPanelDeleteStatic(strpos($identity, 'WHERE Location = :panel_code OR Location = :panel_name') === false, 'Code and legacy-name dependencies are still conflated.');
+assertPanelDeleteStatic(strpos($identity, 'WHERE Location = :panel_code ORDER BY id{$lockClause}') !== false, 'Exact code dependencies are not queried independently.');
+assertPanelDeleteStatic(strpos($identity, 'WHERE Location = :panel_name ORDER BY id{$lockClause}') !== false, 'Legacy name dependencies are not queried independently.');
+foreach (['exact_code_dependencies', 'ambiguous_legacy_name_dependencies', 'unique_legacy_name_dependencies'] as $dependencyCategory) {
+    assertPanelDeleteStatic(strpos($identity, "'{$dependencyCategory}'") !== false, "Missing {$dependencyCategory} result category.");
+}
 assertPanelDeleteStatic(strpos($identity, "deleteCanonicalPanelEmojiMapping(\$panel['code_panel'])") !== false, 'Exact canonical panel emoji mapping is not cleaned.');
 assertPanelDeleteStatic(strpos($identity, '$affectedRows === 0') !== false, 'Zero-row deletion is not handled.');
 assertPanelDeleteStatic(strpos($identity, '$affectedRows > 1') !== false, 'Multi-row deletion is not rolled back as an integrity error.');

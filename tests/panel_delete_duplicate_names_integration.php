@@ -115,13 +115,32 @@ try {
     $deletionState = $selected['code_panel'];
     duplicatePanelAssert($deletionState === 'panel_a', 'Dedicated deletion state would store a name instead of code_panel.');
 
+    $pdo->exec("INSERT INTO product (name_product, code_product, Location) VALUES
+        ('Legacy Promax Plan', 'legacy_promax', 'Promax'),
+        ('Exact panel_a Plan', 'exact_panel_a', 'panel_a')");
+
     $previewA = panelDeletionPreviewByCode('panel_a');
     duplicatePanelAssert($previewA['name_panel'] === 'Promax', 'Deletion preview has the wrong name.');
     duplicatePanelAssert($previewA['type'] === 'marzban', 'Deletion preview has the wrong panel type.');
-    duplicatePanelAssert($previewA['product_count'] === 0, 'Deletion preview has the wrong product count.');
+    duplicatePanelAssert($previewA['exact_product_count'] === 1, 'Exact panel_a dependency count is wrong.');
+    duplicatePanelAssert($previewA['ambiguous_legacy_product_count'] === 1, 'Ambiguous legacy dependency count is wrong.');
+    duplicatePanelAssert($previewA['unique_legacy_product_count'] === 0, 'Duplicate-name legacy dependency was classified as unique.');
+    duplicatePanelAssert($previewA['another_same_name_panel_remains'] === true, 'Preview did not report the remaining same-name panel.');
+
+    $blockedA = deletePanelByCode($deletionState);
+    duplicatePanelAssert($blockedA['status'] === 'has_exact_products', 'Exact panel_a dependency did not block deletion.');
+    duplicatePanelAssert(count($blockedA['exact_code_dependencies']) === 1, 'Exact dependency result is incomplete.');
+    duplicatePanelAssert(count($blockedA['ambiguous_legacy_name_dependencies']) === 1, 'Ambiguous legacy dependency result is incomplete.');
+    duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_a'")->fetchColumn() === 1, 'Blocked exact deletion removed panel_a.');
+
+    $pdo->exec("DELETE FROM product WHERE code_product = 'exact_panel_a'");
+    $previewA = panelDeletionPreviewByCode('panel_a');
+    duplicatePanelAssert($previewA['exact_product_count'] === 0, 'Removed exact dependency remains in the preview.');
+    duplicatePanelAssert($previewA['ambiguous_legacy_product_count'] === 1, 'Legacy Promax dependency is no longer classified as ambiguous.');
+    duplicatePanelAssert($previewA['product_count'] === 0, 'Ambiguous legacy dependency was counted as a deletion blocker.');
 
     $deletedA = deletePanelByCode($deletionState);
-    duplicatePanelAssert($deletedA['status'] === 'deleted', 'panel_a was not deleted.');
+    duplicatePanelAssert($deletedA['status'] === 'deleted', 'panel_a was not deleted while only an ambiguous legacy dependency existed.');
     duplicatePanelAssert($deletedA['affected_rows'] === 1, 'panel_a deletion did not affect exactly one row.');
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_a'")->fetchColumn() === 0, 'panel_a remains after deletion.');
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_b' AND name_panel = 'Promax'")->fetchColumn() === 1, 'panel_b was deleted or changed with panel_a.');
@@ -130,18 +149,33 @@ try {
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'product' AND source_key = 'product_unrelated'")->fetchColumn() === 1, 'Unrelated product mapping was removed.');
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'button' AND source_key = 'button_unrelated'")->fetchColumn() === 1, 'Unrelated button mapping was removed.');
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM styled_button_icons WHERE source_type = 'marzban_panel' AND source_key = 'panel_a'")->fetchColumn() === 1, 'Non-canonical legacy mapping was removed.');
+    duplicatePanelAssert($pdo->query("SELECT Location FROM product WHERE code_product = 'legacy_promax'")->fetchColumn() === 'Promax', 'Legacy product Location was rewritten or deleted.');
+    $legacyResolution = resolvePanelDeletionSelection('Promax');
+    duplicatePanelAssert($legacyResolution && $legacyResolution['code_panel'] === 'panel_b', 'Legacy product name no longer resolves through the remaining same-name panel.');
 
     $replayed = deletePanelByCode('panel_a');
     duplicatePanelAssert($replayed['status'] === 'not_found', 'Repeated confirmation was not a safe stale result.');
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_b'")->fetchColumn() === 1, 'Repeated confirmation deleted panel_b.');
     duplicatePanelAssert(panelDeletionPreviewByCode('panel_missing') === null, 'Stale callback did not return a clean missing result.');
 
+    $finalPreview = panelDeletionPreviewByCode('panel_b');
+    duplicatePanelAssert($finalPreview['exact_product_count'] === 0, 'Final panel has an unexpected exact dependency.');
+    duplicatePanelAssert($finalPreview['ambiguous_legacy_product_count'] === 0, 'Final panel still classifies its legacy dependency as ambiguous.');
+    duplicatePanelAssert($finalPreview['unique_legacy_product_count'] === 1, 'Final panel legacy dependency was not classified as unique.');
+    duplicatePanelAssert($finalPreview['another_same_name_panel_remains'] === false, 'Final panel incorrectly reports another same-name panel.');
+    $finalBlocked = deletePanelByCode('panel_b');
+    duplicatePanelAssert($finalBlocked['status'] === 'has_unique_legacy_products', 'Final Promax panel deletion was not blocked by its legacy dependency.');
+    duplicatePanelAssert(count($finalBlocked['unique_legacy_name_dependencies']) === 1, 'Final-panel legacy dependency result is incomplete.');
+    duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_b'")->fetchColumn() === 1, 'Final-panel dependency block removed panel_b.');
+    duplicatePanelAssert($pdo->query("SELECT Location FROM product WHERE code_product = 'legacy_promax'")->fetchColumn() === 'Promax', 'Blocked final deletion changed the legacy product.');
+    $pdo->exec("DELETE FROM product WHERE code_product = 'legacy_promax'");
+
     $pdo->exec("INSERT INTO product (name_product, code_product, Location)
         VALUES ('Protected Plan', 'product_b', 'panel_b')");
     $previewB = panelDeletionPreviewByCode('panel_b');
-    duplicatePanelAssert($previewB['product_count'] === 1, 'Associated product count is wrong for panel_b.');
+    duplicatePanelAssert($previewB['exact_product_count'] === 1, 'Associated exact product count is wrong for panel_b.');
     $blockedB = deletePanelByCode('panel_b');
-    duplicatePanelAssert($blockedB['status'] === 'has_products', 'Unsafe panel_b deletion was not blocked.');
+    duplicatePanelAssert($blockedB['status'] === 'has_exact_products', 'Unsafe panel_b deletion was not blocked.');
     duplicatePanelAssert((int) $pdo->query("SELECT COUNT(*) FROM marzban_panel WHERE code_panel = 'panel_b'")->fetchColumn() === 1, 'Dependency block removed panel_b.');
     $pdo->exec("DELETE FROM product WHERE code_product = 'product_b'");
 

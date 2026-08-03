@@ -34,11 +34,24 @@ if (!function_exists('panelDeletionConfirmationText')) {
         $code = htmlspecialchars((string) ($panel['code_panel'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $type = htmlspecialchars((string) ($panel['type'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $productCount = (int) ($panel['product_count'] ?? 0);
+        $exactProductCount = (int) ($panel['exact_product_count'] ?? 0);
+        $ambiguousLegacyCount = (int) ($panel['ambiguous_legacy_product_count'] ?? 0);
+        $uniqueLegacyCount = (int) ($panel['unique_legacy_product_count'] ?? 0);
+        $anotherSameNameRemains = !empty($panel['another_same_name_panel_remains']);
+        $dependencySummary = "وابستگی دقیق به شناسهٔ این پنل: <b>{$exactProductCount}</b>\n";
+        if ($anotherSameNameRemains) {
+            $dependencySummary .= "محصول قدیمی با نام مشترک (مبهم): <b>{$ambiguousLegacyCount}</b>\n"
+                . "پنل هم‌نام دیگری باقی می‌ماند: <b>بله</b>\n";
+        } else {
+            $dependencySummary .= "وابستگی قدیمی یکتا به نام پنل: <b>{$uniqueLegacyCount}</b>\n"
+                . "پنل هم‌نام دیگری باقی می‌ماند: <b>خیر</b>\n";
+        }
         return "⚠️ مشخصات پنل انتخاب‌شده برای حذف:\n\n"
             . "نام: <b>{$name}</b>\n"
             . "کد: <code>{$code}</code>\n"
             . "نوع: <code>{$type}</code>\n"
-            . "محصولات مرتبط: <b>{$productCount}</b>\n\n"
+            . $dependencySummary
+            . "وابستگی‌های مسدودکننده: <b>{$productCount}</b>\n\n"
             . "برای حذف همین رکورد، کلمه <code>تایید</code> را ارسال کنید.";
     }
 }
@@ -4963,11 +4976,23 @@ $text_expie_agent
         ]);
         $deleteResult = deletePanelByCode($panel['code_panel']);
         update("user", "Processing_value_tow", "", "id", $from_id);
-        if ($deleteResult['status'] === 'has_products') {
-            $productCount = count($deleteResult['products']);
+        if ($deleteResult['status'] === 'has_exact_products') {
+            $productCount = count($deleteResult['exact_code_dependencies']);
             sendmessage(
                 $from_id,
-                "❌ این رکورد حذف نشد؛ <b>{$productCount}</b> محصول هنوز به همین پنل متصل است.",
+                "❌ این پنل حذف نشد؛ <b>{$productCount}</b> محصول با شناسهٔ پایدار دقیقاً به همین پنل متصل است.",
+                panelAdminSelectionKeyboard('panel_delete_select:'),
+                'HTML'
+            );
+            step('panel_delete_select', $from_id);
+            return;
+        }
+        if ($deleteResult['status'] === 'has_unique_legacy_products') {
+            $productCount = count($deleteResult['unique_legacy_name_dependencies']);
+            $panelName = htmlspecialchars((string) ($deleteResult['panel']['name_panel'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            sendmessage(
+                $from_id,
+                "❌ این آخرین پنل با نام <b>{$panelName}</b> است و <b>{$productCount}</b> محصول قدیمی هنوز با نام پنل به آن متصل‌اند. ابتدا محصولات را به شناسه پایدار پنل منتقل کنید.",
                 panelAdminSelectionKeyboard('panel_delete_select:'),
                 'HTML'
             );
