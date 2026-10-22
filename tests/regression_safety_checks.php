@@ -23,7 +23,7 @@ has($u,'function productPanelLocationValues','stable product-panel guard');
 has($u,'function reserveUserTrialSlot','per-panel trial guard');
 if(strpos($u,'rm -rf "$BOT_DIR"')!==false && strpos($u,'restore_update')===false) bad('unsafe live directory deletion');
 
-has($files['product_panel_identity.php'],'function panelKeyboardButton','panel button helper');
+has($files['keyboard.php'],'function panelKeyboardButton','panel button helper');
 has($files['product_panel_identity.php'],'function productPanelLocationValues','stable panel identity helper');
 has($files['keyboard.php'],'panelKeyboardButton(','Premium Emoji panel button integration');
 has($files['index.php'],'productPanelLocationValues(','stable product location integration');

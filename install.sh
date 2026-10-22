@@ -1598,7 +1598,7 @@ function update_bot() {
     # Reject a release that drops any production-critical behavior.
     grep -Fq "function styledCustomEmojiEnabled" "$EXTRACTED_DIR/emoji_system.php" || {
         echo -e "\e[91mPremium Emoji runtime is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
-    grep -Fq "function panelKeyboardButton" "$EXTRACTED_DIR/product_panel_identity.php" || {
+    grep -Fq "function panelKeyboardButton" "$EXTRACTED_DIR/keyboard.php" || {
         echo -e "\e[91mPanel Premium Emoji renderer is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
     grep -Fq "function productPanelLocationValues" "$EXTRACTED_DIR/product_panel_identity.php" || {
         echo -e "\e[91mStable product-panel identity support is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
@@ -1700,7 +1700,7 @@ function update_bot() {
 
     # Final feature guards on the live tree.
     grep -Fq "function styledCustomEmojiEnabled" "$BOT_DIR/emoji_system.php" || restore_update
-    grep -Fq "function panelKeyboardButton" "$BOT_DIR/product_panel_identity.php" || restore_update
+    grep -Fq "function panelKeyboardButton" "$BOT_DIR/keyboard.php" || restore_update
     grep -Fq "function productPanelLocationValues" "$BOT_DIR/product_panel_identity.php" || restore_update
     grep -Fq "function reserveUserTrialSlot" "$BOT_DIR/function.php" || restore_update
     grep -Fq "panelKeyboardButton(" "$BOT_DIR/keyboard.php" || restore_update
