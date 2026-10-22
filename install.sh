@@ -1517,8 +1517,20 @@ function update_bot() {
     UPDATE_LOG="$BACKUP_DIR/table-update.log"
     CONFIG_BACKUP="$BACKUP_DIR/config.php"
 
+    APACHE_WAS_ACTIVE=0
+    CRON_WAS_ACTIVE=0
+
     cleanup_update_workspace() {
         rm -rf "$WORK_DIR"
+    }
+
+    resume_runtime_services() {
+        if [ "$CRON_WAS_ACTIVE" -eq 1 ]; then
+            systemctl start cron 2>/dev/null || true
+        fi
+        if [ "$APACHE_WAS_ACTIVE" -eq 1 ]; then
+            apache2ctl configtest >/dev/null 2>&1 && systemctl start apache2 2>/dev/null || true
+        fi
     }
 
     restore_update() {
@@ -1532,7 +1544,7 @@ function update_bot() {
         fi
         chown -R www-data:www-data "$BOT_DIR" 2>/dev/null || true
         chmod -R 755 "$BOT_DIR" 2>/dev/null || true
-        apache2ctl configtest >/dev/null 2>&1 && systemctl restart apache2 2>/dev/null || true
+        resume_runtime_services
         cleanup_update_workspace
         unset DB_PASS
         echo -e "\e[91mPrevious bot restored.\033[0m"
@@ -1643,10 +1655,23 @@ function update_bot() {
         exit 1
     }
 
+    echo -e "\e[33mQuiescing bot runtime for a consistent backup...\033[0m"
+    systemctl is-active --quiet apache2 && APACHE_WAS_ACTIVE=1
+    systemctl is-active --quiet cron && CRON_WAS_ACTIVE=1
+    [ "$APACHE_WAS_ACTIVE" -eq 1 ] && systemctl stop apache2
+    [ "$CRON_WAS_ACTIVE" -eq 1 ] && systemctl stop cron
+
     echo -e "\e[33mCreating compressed pre-update backup...\033[0m"
-    cp -a "$BOT_DIR/config.php" "$CONFIG_BACKUP" || exit 1
+    cp -a "$BOT_DIR/config.php" "$CONFIG_BACKUP" || {
+        echo -e "\e[91mCould not preserve config.php. Existing bot was not changed.\033[0m"
+        resume_runtime_services
+        cleanup_update_workspace
+        unset DB_PASS
+        exit 1
+    }
     tar -C /var/www/html -czf "$FILE_BACKUP" "$(basename "$BOT_DIR")" || {
         echo -e "\e[91mFile backup failed. Existing bot was not changed.\033[0m"
+        resume_runtime_services
         cleanup_update_workspace
         unset DB_PASS
         exit 1
@@ -1663,6 +1688,7 @@ function update_bot() {
         "$DB_NAME" > "$DB_DUMP" || {
             echo -e "\e[91mDatabase backup failed. Existing bot was not changed.\033[0m"
             rm -f "$FILE_BACKUP"
+            resume_runtime_services
             cleanup_update_workspace
             unset DB_PASS
             exit 1
@@ -1671,6 +1697,7 @@ function update_bot() {
     if [ ! -s "$DB_DUMP" ]; then
         echo -e "\e[91mDatabase backup is empty. Existing bot was not changed.\033[0m"
         rm -f "$FILE_BACKUP"
+        resume_runtime_services
         cleanup_update_workspace
         unset DB_PASS
         exit 1
@@ -1706,7 +1733,13 @@ function update_bot() {
     grep -Fq "panelKeyboardButton(" "$BOT_DIR/keyboard.php" || restore_update
 
     apache2ctl configtest >/dev/null 2>&1 || restore_update
-    systemctl restart apache2 || restore_update
+    resume_runtime_services
+    if [ "$APACHE_WAS_ACTIVE" -eq 1 ] && ! systemctl is-active --quiet apache2; then
+        restore_update
+    fi
+    if [ "$CRON_WAS_ACTIVE" -eq 1 ] && ! systemctl is-active --quiet cron; then
+        restore_update
+    fi
 
     cp "$BOT_DIR/install.sh" /root/install.sh
     chmod +x /root/install.sh
