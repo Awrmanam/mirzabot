@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rebecca-support
+      - fix/updater-freeze-runtime-during-backup
   workflow_dispatch:
 
 permissions:
