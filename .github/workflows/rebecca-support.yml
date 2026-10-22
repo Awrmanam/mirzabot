@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rebecca-support
+      - fix/alireza-normalize-api-url
   workflow_dispatch:
 
 permissions:
