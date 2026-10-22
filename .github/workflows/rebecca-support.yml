@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - rebecca-support
-      - fix/safe-updater-preserve-current
   workflow_dispatch:
 
 permissions:
