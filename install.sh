@@ -1503,173 +1503,222 @@ EOF
 # }
 # Update Function for Mirza Pro
 function update_bot() {
-    echo "Updating Mirza Pro Bot..."
-    # Update server packages
-    if ! sudo apt update && sudo apt upgrade -y; then
-        echo -e "\e[91mError updating the server. Exiting...\033[0m"
-        exit 1
-    fi
-    echo -e "\e[92mServer packages updated successfully...\033[0m\n"
-    # Check if bot is already installed (Pro Directory)
-    BOT_DIR="/var/www/html/mirzaprobotconfig"
-    if [ ! -d "$BOT_DIR" ]; then
-        echo -e "\e[91mError: Mirza Pro Bot is not installed. Please install it first.\033[0m"
-        exit 1
-    fi
-    # Fetch latest version from GitHub (Always Main Branch for Pro)
-    ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"
-    # Create temporary directory
-    TEMP_DIR="/tmp/mirzaprobot_update"
-    mkdir -p "$TEMP_DIR"
-    # Download and extract
-    echo -e "\e[33mDownloading latest version...\033[0m"
-    wget -q -O "$TEMP_DIR/bot.zip" "$ZIP_URL" || {
-        echo -e "\e[91mError: Failed to download update package.\033[0m"
-        exit 1
-    }
-    unzip -q "$TEMP_DIR/bot.zip" -d "$TEMP_DIR"
-    # Find extracted directory (usually mirza_pro-main)
-    EXTRACTED_DIR=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d)
-    # Backup config file
-    CONFIG_PATH="$BOT_DIR/config.php"
-    TEMP_CONFIG="/root/mirzapro_config_backup.php"
-    if [ -f "$CONFIG_PATH" ]; then
-        cp "$CONFIG_PATH" "$TEMP_CONFIG" || {
-            echo -e "\e[91mConfig file backup failed!\033[0m"
-            exit 1
-        }
-    else
-        echo -e "\e[93mWarning: config.php not found. Proceeding without backup.\033[0m"
-    fi
-    # Remove old version
-    sudo rm -rf "$BOT_DIR" || {
-        echo -e "\e[91mFailed to remove old bot files!\033[0m"
-        exit 1
-    }
-    # Move new files
-    sudo mkdir -p "$BOT_DIR"
-    sudo mv "$EXTRACTED_DIR"/* "$BOT_DIR/" || {
-        echo -e "\e[91mFile transfer failed!\033[0m"
-        exit 1
-    }
-    # Restore config file
-    if [ -f "$TEMP_CONFIG" ]; then
-        sudo mv "$TEMP_CONFIG" "$CONFIG_PATH" || {
-            echo -e "\e[91mConfig file restore failed!\033[0m"
-            exit 1
-        }
-    fi
-    # Copy the new install.sh to /root/ to ensure script self-update works next time
-    if [ -f "$BOT_DIR/install.sh" ]; then
-        sudo cp "$BOT_DIR/install.sh" /root/install.sh
-        echo -e "\n\e[92mCopied latest install.sh to /root/install.sh.\033[0m"
-    else
-        echo -e "\n\e[91mWarning: install.sh not found in update files.\033[0m"
-    fi
-    # Set permissions
-    sudo chown -R www-data:www-data "$BOT_DIR"
-    sudo chmod -R 755 "$BOT_DIR"
-    # Extract domain name from config for VirtualHost setup
-    DOMAIN_NAME=""
-    if [ -f "$CONFIG_PATH" ]; then
-        DOMAIN_NAME=$(grep "^\$domainhosts" "$CONFIG_PATH" | cut -d"'" -f2 | cut -d'/' -f1)
-    fi
-    # If domain found, update Apache VirtualHost configuration
-    if [ -n "$DOMAIN_NAME" ]; then
-        echo -e "\e[33mUpdating Apache VirtualHost configuration for domain: $DOMAIN_NAME\033[0m"
-        # Create Apache VirtualHost configuration for port 80
-        VHOST_FILE="/etc/apache2/sites-available/${DOMAIN_NAME}.conf"
-        sudo tee "$VHOST_FILE" > /dev/null <<EOF
-<VirtualHost *:80>
-    ServerName $DOMAIN_NAME
-    DocumentRoot $BOT_DIR
-    <Directory $BOT_DIR>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
-    # Include phpMyAdmin configuration
-    Include /etc/apache2/conf-available/phpmyadmin.conf
-    ErrorLog \${APACHE_LOG_DIR}/${DOMAIN_NAME}-error.log
-    CustomLog \${APACHE_LOG_DIR}/${DOMAIN_NAME}-access.log combined
-</VirtualHost>
-EOF
-        # Create Apache VirtualHost configuration for port 443 (HTTPS)
-        VHOST_SSL_FILE="/etc/apache2/sites-available/${DOMAIN_NAME}-ssl.conf"
-        sudo tee "$VHOST_SSL_FILE" > /dev/null <<EOF
-<VirtualHost *:443>
-    ServerName $DOMAIN_NAME
-    DocumentRoot $BOT_DIR
-    SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem
-    <Directory $BOT_DIR>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
-    # Include phpMyAdmin configuration
-    Include /etc/apache2/conf-available/phpmyadmin.conf
-    ErrorLog \${APACHE_LOG_DIR}/${DOMAIN_NAME}-error.log
-    CustomLog \${APACHE_LOG_DIR}/${DOMAIN_NAME}-access.log combined
-</VirtualHost>
-EOF
-        # Enable the new virtual hosts (if not already enabled)
-        if ! sudo apache2ctl -S 2>/dev/null | grep -q "$DOMAIN_NAME"; then
-            sudo a2ensite "${DOMAIN_NAME}.conf" 2>/dev/null || true
-            sudo a2ensite "${DOMAIN_NAME}-ssl.conf" 2>/dev/null || true
+    echo -e "\e[36mUpdating Mirza Pro Bot safely...\033[0m"
 
-            # --- FIX: CLEANUP DURING UPDATE ---
-            echo -e "\e[33mCleaning up conflicting default Apache sites...\033[0m"
-            
-            # Disable all variations of default sites
-            sudo a2dissite 000-default.conf 2>/dev/null || true
-            sudo a2dissite 000-default-le-ssl.conf 2>/dev/null || true
-            sudo a2dissite default-ssl.conf 2>/dev/null || true
-            
-            # Force remove links from sites-enabled
-            sudo rm -f /etc/apache2/sites-enabled/000-default* 2>/dev/null || true
-            sudo rm -f /etc/apache2/sites-enabled/default-ssl* 2>/dev/null || true
-            
-            # Remove the source files to be sure
-            sudo rm -f /etc/apache2/sites-available/000-default.conf 2>/dev/null || true
-            sudo rm -f /etc/apache2/sites-available/000-default-le-ssl.conf 2>/dev/null || true
-            sleep 3 
-            # Enable SSL module
-            sudo a2enmod ssl 2>/dev/null || true
+    BOT_DIR="/var/www/html/mirzaprobotconfig"
+    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip"
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    WORK_DIR="/tmp/mirza-update-$TIMESTAMP"
+    DOWNLOAD_DIR="$WORK_DIR/download"
+    ZIP_FILE="$WORK_DIR/mirza.zip"
+    BACKUP_DIR="/root/mirza-auto-backup-$TIMESTAMP"
+    FILE_BACKUP="$BACKUP_DIR/files.tar.gz"
+    DB_DUMP="$BACKUP_DIR/database.sql"
+    UPDATE_LOG="$BACKUP_DIR/table-update.log"
+    CONFIG_BACKUP="$BACKUP_DIR/config.php"
+
+    cleanup_update_workspace() {
+        rm -rf "$WORK_DIR"
+    }
+
+    restore_update() {
+        echo -e "\e[91mUpdate failed. Restoring previous files and database...\033[0m"
+        if [ -s "$FILE_BACKUP" ]; then
+            rm -rf "$BOT_DIR"
+            tar -C /var/www/html -xzf "$FILE_BACKUP" || true
         fi
-        # Test Apache configuration
-        if sudo apache2ctl configtest 2>/dev/null | grep -q "Syntax OK"; then
-            sudo systemctl restart apache2 || {
-                echo -e "\e[91mWarning: Failed to restart Apache2 after updating VirtualHost.\033[0m"
-            }
-            echo -e "\e[92mVirtualHost configuration updated and Apache restarted.\033[0m"
-        else
-            echo -e "\e[93mWarning: Apache configuration test failed. Skipping restart.\033[0m"
+        if [ -s "$DB_DUMP" ] && [ -n "$DB_NAME" ] && [ -n "$DB_USER" ]; then
+            MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" < "$DB_DUMP" || true
         fi
+        chown -R www-data:www-data "$BOT_DIR" 2>/dev/null || true
+        chmod -R 755 "$BOT_DIR" 2>/dev/null || true
+        apache2ctl configtest >/dev/null 2>&1 && systemctl restart apache2 2>/dev/null || true
+        cleanup_update_workspace
+        unset DB_PASS
+        echo -e "\e[91mPrevious bot restored.\033[0m"
+        exit 1
+    }
+
+    if [ ! -d "$BOT_DIR" ] || [ ! -f "$BOT_DIR/config.php" ]; then
+        echo -e "\e[91mMirza installation or config.php was not found.\033[0m"
+        exit 1
     fi
-    # Run setup script (table.php) to apply any DB changes
-    # Extracting the domain/path from the new config structure
-    if [ -f "$CONFIG_PATH" ]; then
-        URL_PATH=$(grep "^\$domainhosts" "$CONFIG_PATH" | cut -d"'" -f2)
-        if [ -n "$URL_PATH" ]; then
-            echo -e "\e[33mUpdating database tables...\033[0m"
-            curl -s "https://$URL_PATH/table.php" > /dev/null || {
-                echo -e "\e[91mSetup script execution failed! Check logs.\033[0m"
-            }
-        fi
+
+    for cmd in wget unzip php tar mysqldump mysql apache2ctl; do
+        command -v "$cmd" >/dev/null 2>&1 || {
+            echo -e "\e[91mRequired command '$cmd' is missing. Existing bot was not changed.\033[0m"
+            exit 1
+        }
+    done
+
+    rm -rf "$WORK_DIR"
+    mkdir -p "$DOWNLOAD_DIR" "$BACKUP_DIR" || exit 1
+
+    echo -e "\e[33mDownloading update package...\033[0m"
+    wget -q -O "$ZIP_FILE" "$ZIP_URL" || {
+        echo -e "\e[91mDownload failed. Existing bot was not changed.\033[0m"
+        cleanup_update_workspace
+        exit 1
+    }
+
+    unzip -q "$ZIP_FILE" -d "$DOWNLOAD_DIR" || {
+        echo -e "\e[91mDownloaded archive is invalid. Existing bot was not changed.\033[0m"
+        cleanup_update_workspace
+        exit 1
+    }
+
+    EXTRACTED_DIR=$(find "$DOWNLOAD_DIR" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    if [ -z "$EXTRACTED_DIR" ]; then
+        echo -e "\e[91mExtracted release directory was not found. Existing bot was not changed.\033[0m"
+        cleanup_update_workspace
+        exit 1
     fi
-    # Cleanup
-    rm -rf "$TEMP_DIR"
-    echo -e "\n\e[92mMirza Bot updated to latest version successfully!\033[0m"
-    # Ensure /root/install.sh is executable and linked to mirza
-    if [ -f "/root/install.sh" ]; then
-        sudo chmod +x /root/install.sh
-        sudo ln -sf /root/install.sh /usr/local/bin/mirza
-        echo -e "\e[92mEnsured /root/install.sh is executable and 'mirza' command is linked.\033[0m"
-    else
-        echo -e "\e[91mError: /root/install.sh not found after update attempt.\033[0m"
+
+    echo -e "\e[33mValidating release before touching live files...\033[0m"
+    REQUIRED_FILES=(
+        "index.php"
+        "admin.php"
+        "function.php"
+        "keyboard.php"
+        "table.php"
+        "botapi.php"
+        "emoji_system.php"
+        "emoji_install.php"
+        "product_panel_identity.php"
+        "install.sh"
+    )
+    for required_file in "${REQUIRED_FILES[@]}"; do
+        [ -f "$EXTRACTED_DIR/$required_file" ] || {
+            echo -e "\e[91mRelease is missing $required_file. Existing bot was not changed.\033[0m"
+            cleanup_update_workspace
+            exit 1
+        }
+    done
+
+    # Reject a release that drops any production-critical behavior.
+    grep -Fq "function styledCustomEmojiEnabled" "$EXTRACTED_DIR/emoji_system.php" || {
+        echo -e "\e[91mPremium Emoji runtime is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
+    grep -Fq "function panelKeyboardButton" "$EXTRACTED_DIR/product_panel_identity.php" || {
+        echo -e "\e[91mPanel Premium Emoji renderer is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
+    grep -Fq "function productPanelLocationValues" "$EXTRACTED_DIR/product_panel_identity.php" || {
+        echo -e "\e[91mStable product-panel identity support is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
+    grep -Fq "function reserveUserTrialSlot" "$EXTRACTED_DIR/function.php" || {
+        echo -e "\e[91mPer-panel trial protection is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
+    grep -Fq "panelKeyboardButton(" "$EXTRACTED_DIR/keyboard.php" || {
+        echo -e "\e[91mPanel button rendering integration is missing from release. Existing bot was not changed.\033[0m"; cleanup_update_workspace; exit 1; }
+
+    PHP_SYNTAX_FAILED=0
+    while IFS= read -r -d '' php_file; do
+        php -l "$php_file" >/dev/null 2>&1 || {
+            echo -e "\e[91mPHP syntax error: $php_file\033[0m"
+            PHP_SYNTAX_FAILED=1
+            break
+        }
+    done < <(find "$EXTRACTED_DIR" -maxdepth 2 -type f -name '*.php' -print0)
+
+    if [ "$PHP_SYNTAX_FAILED" -ne 0 ]; then
+        cleanup_update_workspace
+        exit 1
     fi
+
+    echo -e "\e[33mReading current database configuration...\033[0m"
+    eval "$(php -r '
+        include "/var/www/html/mirzaprobotconfig/config.php";
+        echo "DB_HOST=".escapeshellarg($dbhost).";";
+        echo "DB_NAME=".escapeshellarg($dbname).";";
+        echo "DB_USER=".escapeshellarg($usernamedb).";";
+        echo "DB_PASS=".escapeshellarg($passworddb).";";
+    ')" || {
+        echo -e "\e[91mCould not read database credentials. Existing bot was not changed.\033[0m"
+        cleanup_update_workspace
+        exit 1
+    }
+
+    PRODUCT_COUNT_BEFORE=$(MYSQL_PWD="$DB_PASS" mysql -N -s -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" -e "SELECT COUNT(*) FROM product;" 2>/dev/null)
+    PANEL_COUNT_BEFORE=$(MYSQL_PWD="$DB_PASS" mysql -N -s -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" -e "SELECT COUNT(*) FROM marzban_panel;" 2>/dev/null)
+    [ -n "$PRODUCT_COUNT_BEFORE" ] && [ -n "$PANEL_COUNT_BEFORE" ] || {
+        echo -e "\e[91mCould not read product/panel counts. Existing bot was not changed.\033[0m"
+        cleanup_update_workspace
+        unset DB_PASS
+        exit 1
+    }
+
+    echo -e "\e[33mCreating compressed pre-update backup...\033[0m"
+    cp -a "$BOT_DIR/config.php" "$CONFIG_BACKUP" || exit 1
+    tar -C /var/www/html -czf "$FILE_BACKUP" "$(basename "$BOT_DIR")" || {
+        echo -e "\e[91mFile backup failed. Existing bot was not changed.\033[0m"
+        cleanup_update_workspace
+        unset DB_PASS
+        exit 1
+    }
+
+    MYSQL_PWD="$DB_PASS" mysqldump \
+        --no-tablespaces \
+        --single-transaction \
+        --skip-lock-tables \
+        --routines \
+        --triggers \
+        -h "$DB_HOST" \
+        -u "$DB_USER" \
+        "$DB_NAME" > "$DB_DUMP" || {
+            echo -e "\e[91mDatabase backup failed. Existing bot was not changed.\033[0m"
+            rm -f "$FILE_BACKUP"
+            cleanup_update_workspace
+            unset DB_PASS
+            exit 1
+        }
+
+    if [ ! -s "$DB_DUMP" ]; then
+        echo -e "\e[91mDatabase backup is empty. Existing bot was not changed.\033[0m"
+        rm -f "$FILE_BACKUP"
+        cleanup_update_workspace
+        unset DB_PASS
+        exit 1
+    fi
+
+    echo -e "\e[33mOverlaying validated release onto current installation...\033[0m"
+    cp -a "$EXTRACTED_DIR"/. "$BOT_DIR"/ || restore_update
+    cp -a "$CONFIG_BACKUP" "$BOT_DIR/config.php" || restore_update
+
+    chown -R www-data:www-data "$BOT_DIR"
+    chmod -R 755 "$BOT_DIR"
+
+    echo -e "\e[33mApplying database migrations...\033[0m"
+    if ! (cd "$BOT_DIR" && php table.php > "$UPDATE_LOG" 2>&1); then
+        restore_update
+    fi
+
+    PRODUCT_COUNT_AFTER=$(MYSQL_PWD="$DB_PASS" mysql -N -s -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" -e "SELECT COUNT(*) FROM product;" 2>/dev/null)
+    PANEL_COUNT_AFTER=$(MYSQL_PWD="$DB_PASS" mysql -N -s -h "$DB_HOST" -u "$DB_USER" "$DB_NAME" -e "SELECT COUNT(*) FROM marzban_panel;" 2>/dev/null)
+
+    if [ -z "$PRODUCT_COUNT_AFTER" ] || [ -z "$PANEL_COUNT_AFTER" ] \
+        || [ "$PRODUCT_COUNT_AFTER" -lt "$PRODUCT_COUNT_BEFORE" ] \
+        || [ "$PANEL_COUNT_AFTER" -lt "$PANEL_COUNT_BEFORE" ]; then
+        echo -e "\e[91mProduct/panel safety check failed after migration.\033[0m"
+        restore_update
+    fi
+
+    # Final feature guards on the live tree.
+    grep -Fq "function styledCustomEmojiEnabled" "$BOT_DIR/emoji_system.php" || restore_update
+    grep -Fq "function panelKeyboardButton" "$BOT_DIR/product_panel_identity.php" || restore_update
+    grep -Fq "function productPanelLocationValues" "$BOT_DIR/product_panel_identity.php" || restore_update
+    grep -Fq "function reserveUserTrialSlot" "$BOT_DIR/function.php" || restore_update
+    grep -Fq "panelKeyboardButton(" "$BOT_DIR/keyboard.php" || restore_update
+
+    apache2ctl configtest >/dev/null 2>&1 || restore_update
+    systemctl restart apache2 || restore_update
+
+    cp "$BOT_DIR/install.sh" /root/install.sh
+    chmod +x /root/install.sh
+    ln -sf /root/install.sh /usr/local/bin/mirza
+
+    cleanup_update_workspace
+    unset DB_PASS
+
+    echo
+    echo -e "\e[92m✅ Mirza Bot update completed safely.\033[0m"
+    echo -e "\e[36mBackup: $BACKUP_DIR\033[0m"
+    echo -e "\e[36mProducts: $PRODUCT_COUNT_BEFORE -> $PRODUCT_COUNT_AFTER | Panels: $PANEL_COUNT_BEFORE -> $PANEL_COUNT_AFTER\033[0m"
 }
 # Delete Function for Mirza Pro
 function remove_bot() {

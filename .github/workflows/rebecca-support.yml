@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rebecca-support
+      - integration/current-plus-per-panel-trials
   workflow_dispatch:
 
 permissions:
@@ -33,6 +34,15 @@ jobs:
           php -l scripts/cleanup_custom_emoji_usage.php
           php -l tests/custom_emoji_performance.php
           php -l tests/performance_static_checks.php
+          php -l product_panel_identity.php
+          php -l tests/installer_premium_emoji_static.php
+          php -l tests/product_panel_stable_id_static.php
+          php -l tests/product_panel_stable_id_integration.php
+          php -l tests/product_inline_emoji_static.php
+          php -l tests/product_inline_emoji_integration.php
+          php -l tests/panel_inline_emoji_static.php
+          php -l tests/panel_inline_emoji_integration.php
+          php -l tests/regression_safety_checks.php
 
       - name: Validate installer syntax
         run: bash -n install.sh
@@ -77,6 +87,17 @@ jobs:
           php tests/custom_emoji_performance.php enabled
           php tests/custom_emoji_performance.php usage
           php tests/performance_static_checks.php
+
+      - name: Validate product, panel and emoji regressions
+        run: |
+          php tests/installer_premium_emoji_static.php
+          php tests/product_panel_stable_id_static.php
+          php tests/product_panel_stable_id_integration.php
+          php tests/product_inline_emoji_static.php
+          php tests/product_inline_emoji_integration.php
+          php tests/panel_inline_emoji_static.php
+          php tests/panel_inline_emoji_integration.php
+          php tests/regression_safety_checks.php
 
       - name: Verify Rebecca integration and fork-pinned installer
         shell: bash
