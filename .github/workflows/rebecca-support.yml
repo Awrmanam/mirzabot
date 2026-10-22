@@ -51,6 +51,8 @@ jobs:
           php -l tests/custom_emoji_performance.php
           php -l tests/performance_static_checks.php
           php -l product_panel_identity.php
+          php -l alireza_single.php
+          php -l tests/alireza_redirect_reauth_static.php
           php -l tests/installer_premium_emoji_static.php
           php -l tests/product_panel_stable_id_static.php
           php -l tests/product_panel_stable_id_integration.php
@@ -114,6 +116,7 @@ jobs:
           php tests/panel_inline_emoji_static.php
           php tests/panel_inline_emoji_integration.php
           php tests/regression_safety_checks.php
+          php tests/alireza_redirect_reauth_static.php
 
       - name: Verify Rebecca integration and fork-pinned installer
         shell: bash

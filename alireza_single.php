@@ -4,6 +4,36 @@ require_once 'x-ui_single.php';
 require_once 'request.php';
 ini_set('error_log', 'error_log');
 
+function alirezaApiPostWithReauth(array $panel, $url, $payload, array $headers = [])
+{
+    $sendRequest = function () use ($url, $payload, $headers) {
+        $req = new CurlRequest($url);
+        if (!empty($headers)) {
+            $req->setHeaders($headers);
+        }
+        $req->setCookie('cookie.txt');
+        return $req->post($payload);
+    };
+
+    login($panel['code_panel']);
+    $response = $sendRequest();
+    $status = (int) ($response['status'] ?? 0);
+
+    if (in_array($status, [301, 302, 303, 307, 308, 401, 403], true)) {
+        if (is_file('cookie.txt')) {
+            @unlink('cookie.txt');
+        }
+        login($panel['code_panel'], false);
+        $response = $sendRequest();
+    }
+
+    if (is_file('cookie.txt')) {
+        @unlink('cookie.txt');
+    }
+
+    return $response;
+}
+
 function get_clinetsalireza($username,$namepanel){
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
     login($marzban_list_get['code_panel']);
@@ -51,7 +81,6 @@ return $output;
 }
 function addClientalireza_singel($namepanel, $usernameac, $Expire,$Total, $Uuid,$Flow,$subid,$inboundid){
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
-    login($marzban_list_get['code_panel']);
     $config = array(
         "id" => intval($inboundid),
         'settings' => json_encode(array(
@@ -78,61 +107,38 @@ function addClientalireza_singel($namepanel, $usernameac, $Expire,$Total, $Uuid,
             'Accept: application/json',
             'Content-Type: application/json',
     );
-    $req = new CurlRequest($url);
-    $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
-    $response = $req->post($configpanel);
-    unlink('cookie.txt');
-    return $response;
+    return alirezaApiPostWithReauth($marzban_list_get, $url, $configpanel, $headers);
 }
 function updateClientalireza($namepanel, $username,array $config){
     $UsernameData = get_clinetsalireza($username,$namepanel)[0];
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
-    login($marzban_list_get['code_panel']);
     $configpanel = json_encode($config,true);
     $url = $marzban_list_get['url_panel'].'/xui/API/inbounds/updateClient/'.$UsernameData['id'];
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
     );
-    $req = new CurlRequest($url);
-    $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
-    $response = $req->post($configpanel);
-    unlink('cookie.txt');
-    return $response;
+    return alirezaApiPostWithReauth($marzban_list_get, $url, $configpanel, $headers);
 }
 function ResetUserDataUsagealirezasin($usernamepanel, $namepanel){
     $data_user = get_clinetsalireza($usernamepanel,$namepanel)[0];
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
-    login($marzban_list_get['code_panel']);
     $url = $marzban_list_get['url_panel']."/xui/API/inbounds/{$marzban_list_get['inboundid']}/resetClientTraffic/".$data_user['email'];
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
     );
-    $req = new CurlRequest($url);
-    $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
-    $response = $req->post($configpanel);
-    unlink('cookie.txt');
-    return $response;
+    return alirezaApiPostWithReauth($marzban_list_get, $url, [], $headers);
 }
 function removeClientalireza_single($location,$username){
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
     $data_user = get_clinetsalireza($username,$location)[0];
-    login($marzban_list_get['code_panel']);
     $url = $marzban_list_get['url_panel']."/xui/API/inbounds/{$marzban_list_get['inboundid']}/delClient/".$data_user['id'];
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
     );
-    $req = new CurlRequest($url);
-    $req->setHeaders($headers);
-    $req->setCookie('cookie.txt');
-    $response = $req->post(array());
-    unlink('cookie.txt');
-    return $response;
+    return alirezaApiPostWithReauth($marzban_list_get, $url, [], $headers);
     
 }
 function get_onlineclialireza($name_panel,$username){
