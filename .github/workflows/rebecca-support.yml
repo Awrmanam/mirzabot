@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - rebecca-support
-      - fix/alireza-api-reauth-on-redirect
   workflow_dispatch:
 
 permissions:
