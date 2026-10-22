@@ -3128,23 +3128,28 @@ $textconnect
         sendmessage($from_id, "📌 سرویس تست در حال حاضر در دسترس نیست .", null, 'HTML');
         return;
     }
-    $locationproduct = select("marzban_panel", "*", "TestAccount", "ONTestAccount", "count");
-    if ($locationproduct == 0) {
+
+    $isTrialAdmin = in_array($from_id, $admin_ids);
+    $accessibleTrialPanels = getUserAccessibleTrialPanels($from_id, $user['agent']);
+    if (count($accessibleTrialPanels) === 0) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
         return;
     }
-    if ($locationproduct != 1) {
+
+    $eligibleTrialPanels = getUserEligibleTrialPanels($from_id, $user['agent'], (int) $user['limit_usertest'], $isTrialAdmin);
+    if (count($eligibleTrialPanels) === 0) {
+        sendmessage($from_id, $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
+        return;
+    }
+
+    if (count($eligibleTrialPanels) > 1) {
         if ($setting['get_number'] == "onAuthenticationphone" && $user['step'] != "get_number" && $user['number'] == "none") {
             sendmessage($from_id, $textbotlang['users']['number']['Confirming'], $request_contact, 'HTML');
             step('get_number', $from_id);
-        }
-        if ($user['number'] == "none" && $setting['get_number'] == "onAuthenticationphone")
-            return;
-        if ($user['limit_usertest'] <= 0 && !in_array($from_id, $admin_ids)) {
-            sendmessage($from_id, $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
             return;
         }
         sendmessage($from_id, $datatextbot['textselectlocation'], $list_marzban_usertest, 'html');
+        return;
     }
 }
 if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $datain, $dataget) || ($text == $datatextbot['text_usertest'] || $datain == "usertestbtn" || $text == "usertest")) {
@@ -3153,39 +3158,48 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
         return;
     }
     $userlimit = select("user", "*", "id", $from_id, "select");
-    if ($userlimit['limit_usertest'] <= 0 && !in_array($from_id, $admin_ids)) {
-        sendmessage($from_id, $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
+    $isTrialAdmin = in_array($from_id, $admin_ids);
+    $accessibleTrialPanels = getUserAccessibleTrialPanels($from_id, $user['agent']);
+    if (count($accessibleTrialPanels) === 0) {
+        sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
         return;
     }
+
+    $eligibleTrialPanels = getUserEligibleTrialPanels($from_id, $user['agent'], (int) $userlimit['limit_usertest'], $isTrialAdmin);
+    if (count($eligibleTrialPanels) === 0) {
+        sendmessage($from_id, $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
+        step('home', $from_id);
+        return;
+    }
+
     if ($setting['get_number'] == "onAuthenticationphone" && $user['step'] != "get_number" && $user['number'] == "none") {
         sendmessage($from_id, $textbotlang['users']['number']['Confirming'], $request_contact, 'HTML');
         step('get_number', $from_id);
-    }
-    if ($user['number'] == "none" && $setting['get_number'] == "onAuthenticationphone")
         return;
-    $locationproduct = select("marzban_panel", "*", "TestAccount", "ONTestAccount", "count");
-    if ($locationproduct == 1) {
-        $panel = select("marzban_panel", "*", "TestAccount", "ONTestAccount", "select");
-        if ($panel['hide_user'] != null) {
-            $list_user = json_decode($panel['hide_user'], true);
-            if (in_array($from_id, $list_user)) {
-                sendmessage($from_id, $textbotlang['Admin']['managepanel']['nullpanel'], null, 'HTML');
-                return;
-            }
-        }
-        $location = $panel['code_panel'];
+    }
+
+    if (count($eligibleTrialPanels) === 1) {
+        $location = $eligibleTrialPanels[0]['code_panel'];
+    } elseif (isset($dataget[1])) {
+        $location = $dataget[1];
+    } elseif ($user['step'] == "createusertest") {
+        $location = $user['Processing_value_one'];
     } else {
-        if (isset($dataget[1])) {
-            $location = $dataget[1];
-        } else {
-            if ($user['step'] != "createusertest") {
-                return;
-            } else {
-                $location = $user['Processing_value_one'];
-            }
+        return;
+    }
+
+    $marzban_list_get = null;
+    foreach ($eligibleTrialPanels as $trialPanel) {
+        if ((string) $trialPanel['code_panel'] === (string) $location) {
+            $marzban_list_get = $trialPanel;
+            break;
         }
     }
-    $marzban_list_get = select("marzban_panel", "*", "code_panel", $location, "select");
+    if (!is_array($marzban_list_get)) {
+        sendmessage($from_id, $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
+        step('home', $from_id);
+        return;
+    }
     if ($marzban_list_get['MethodUsername'] == $textbotlang['users']['customusername'] || $marzban_list_get['MethodUsername'] == "نام کاربری دلخواه + عدد رندوم") {
         if ($user['step'] != "createusertest") {
             step('createusertest', $from_id);
@@ -3217,8 +3231,6 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
             return;
         }
     }
-    $limit_usertest = $userlimit['limit_usertest'] - 1;
-    update("user", "limit_usertest", $limit_usertest, "id", $from_id);
     $randomString = bin2hex(random_bytes(4));
     $text = strtolower($text);
     $marzban_list_get = select("marzban_panel", "*", "code_panel", $name_panel, "select");
@@ -3250,9 +3262,32 @@ if ($user['step'] == "createusertest" || preg_match('/locationtest_(.*)/', $data
     $stmt->bind_param("sssssssssss", $from_id, $randomString, $username_ac, $date, $marzban_list_get['name_panel'], $info_product['name_product'], $info_product['price_product'], $marzban_list_get['val_usertest'], $marzban_list_get['time_usertest'], $Status, $notifctions);
     $stmt->execute();
     $stmt->close();
-    $dataoutput = $ManagePanel->createUser($marzban_list_get['name_panel'], "usertest", $username_ac, $datac);
-    if ($dataoutput['username'] == null) {
-        $dataoutput['msg'] = json_encode($dataoutput['msg']);
+    $trialSlotReserved = false;
+    if (!$isTrialAdmin) {
+        $trialSlotReserved = reserveUserTrialSlot($from_id, $marzban_list_get['code_panel'], (int) $userlimit['limit_usertest']);
+        if (!$trialSlotReserved) {
+            update("invoice", "Status", "Unsuccessful", "id_invoice", $randomString);
+            sendmessage($from_id, $textbotlang['users']['usertest']['limitwarning'], $keyboard_buy, 'html');
+            step('home', $from_id);
+            return;
+        }
+    }
+
+    try {
+        $dataoutput = $ManagePanel->createUser($marzban_list_get['name_panel'], "usertest", $username_ac, $datac);
+    } catch (Throwable $trialCreateError) {
+        $dataoutput = ['username' => null, 'msg' => $trialCreateError->getMessage()];
+    }
+
+    if (!is_array($dataoutput)) {
+        $dataoutput = ['username' => null, 'msg' => $dataoutput];
+    }
+
+    if (($dataoutput['username'] ?? null) == null) {
+        if ($trialSlotReserved) {
+            releaseUserTrialSlot($from_id, $marzban_list_get['code_panel']);
+        }
+        $dataoutput['msg'] = json_encode($dataoutput['msg'] ?? 'Unknown panel error');
         sendmessage($from_id, $textbotlang['users']['usertest']['errorcreat'], $keyboard, 'html');
         $texterros = "
 ⭕️ یک کاربر قصد دریافت اکانت  تست داشت که ساخت کانفیگ با خطا مواجه شده و به کاربر کانفیگ داده نشد

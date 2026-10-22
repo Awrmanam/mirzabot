@@ -2075,6 +2075,252 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
         }
     }
 }
+
+/**
+ * Free-trial usage is tracked per user + stable panel code.
+ * user.limit_usertest is the configured maximum number of trials per panel.
+ */
+function ensureUserTrialUsageTable()
+{
+    global $pdo;
+    static $ready = false;
+
+    if ($ready) {
+        return true;
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'user_trial_usage'");
+        $stmt->execute();
+        $tableExisted = (int) $stmt->fetchColumn() > 0;
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS user_trial_usage (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(500) NOT NULL,
+            panel_code VARCHAR(200) NOT NULL,
+            used_count INT UNSIGNED NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_user_trial_panel (user_id, panel_code),
+            KEY idx_user_trial_user (user_id),
+            KEY idx_user_trial_panel (panel_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'setting'
+              AND COLUMN_NAME = 'trial_usage_migrated'");
+        $stmt->execute();
+        if ((int) $stmt->fetchColumn() === 0) {
+            $pdo->exec("ALTER TABLE setting ADD trial_usage_migrated VARCHAR(20) NULL DEFAULT '0'");
+        }
+
+        $stmt = $pdo->query("SELECT COALESCE(trial_usage_migrated, '0') FROM setting LIMIT 1");
+        $migrationDone = $stmt ? (string) $stmt->fetchColumn() : '0';
+        if (!$tableExisted) {
+            $migrationDone = '0';
+        }
+
+        if ($migrationDone !== '1') {
+            $pdo->beginTransaction();
+            try {
+                $pdo->exec("INSERT INTO user_trial_usage (user_id, panel_code, used_count)
+                    SELECT i.id_user, p.code_panel, COUNT(*)
+                    FROM invoice i
+                    INNER JOIN marzban_panel p
+                      ON p.id = (
+                          SELECT MIN(p2.id)
+                          FROM marzban_panel p2
+                          WHERE p2.name_panel = i.Service_location
+                      )
+                    WHERE i.name_product = 'سرویس تست'
+                      AND LOWER(COALESCE(i.Status, '')) NOT IN ('unsuccessful', 'unpaid')
+                      AND p.code_panel IS NOT NULL
+                      AND p.code_panel <> ''
+                    GROUP BY i.id_user, p.code_panel
+                    ON DUPLICATE KEY UPDATE used_count = GREATEST(used_count, VALUES(used_count))");
+                $pdo->exec("UPDATE setting SET trial_usage_migrated = '1'");
+                $pdo->commit();
+            } catch (Throwable $migrationError) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $migrationError;
+            }
+        }
+
+        $ready = true;
+        return true;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('Unable to initialize per-panel trial usage: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function getUserTrialUsage($userId, $panelCode)
+{
+    global $pdo;
+    if (!ensureUserTrialUsageTable()) return 0;
+
+    $stmt = $pdo->prepare("SELECT used_count FROM user_trial_usage WHERE user_id = ? AND panel_code = ? LIMIT 1");
+    $stmt->execute([(string) $userId, (string) $panelCode]);
+    $used = $stmt->fetchColumn();
+    return $used === false ? 0 : max(0, (int) $used);
+}
+
+function getUserAccessibleTrialPanels($userId, $agent)
+{
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT * FROM marzban_panel
+        WHERE TestAccount = 'ONTestAccount'
+          AND (agent = :agent OR agent = 'all')
+        ORDER BY id ASC");
+    $stmt->execute([':agent' => (string) $agent]);
+
+    $panels = [];
+    while ($panel = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $hiddenUsers = json_decode((string) ($panel['hide_user'] ?? ''), true);
+        if (is_array($hiddenUsers)) {
+            $hiddenUsers = array_map('strval', $hiddenUsers);
+            if (in_array((string) $userId, $hiddenUsers, true)) continue;
+        }
+        $panels[] = $panel;
+    }
+    return $panels;
+}
+
+function getUserEligibleTrialPanels($userId, $agent, $perPanelLimit, $bypassLimit = false)
+{
+    global $pdo;
+
+    $panels = getUserAccessibleTrialPanels($userId, $agent);
+    if ($bypassLimit) return $panels;
+
+    $limit = max(0, (int) $perPanelLimit);
+    if ($limit <= 0 || empty($panels) || !ensureUserTrialUsageTable()) return [];
+
+    $panelCodes = array_values(array_unique(array_map(function ($panel) {
+        return (string) $panel['code_panel'];
+    }, $panels)));
+
+    $placeholders = implode(',', array_fill(0, count($panelCodes), '?'));
+    $params = array_merge([(string) $userId], $panelCodes);
+    $stmt = $pdo->prepare("SELECT panel_code, used_count
+        FROM user_trial_usage
+        WHERE user_id = ?
+          AND panel_code IN ($placeholders)");
+    $stmt->execute($params);
+
+    $usageByPanel = [];
+    while ($usage = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $usageByPanel[(string) $usage['panel_code']] = (int) $usage['used_count'];
+    }
+
+    return array_values(array_filter($panels, function ($panel) use ($usageByPanel, $limit) {
+        $panelCode = (string) $panel['code_panel'];
+        return ($usageByPanel[$panelCode] ?? 0) < $limit;
+    }));
+}
+
+function reserveUserTrialSlot($userId, $panelCode, $perPanelLimit)
+{
+    global $pdo;
+
+    $limit = max(0, (int) $perPanelLimit);
+    if ($limit <= 0 || !ensureUserTrialUsageTable()) return false;
+
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("INSERT IGNORE INTO user_trial_usage (user_id, panel_code, used_count) VALUES (?, ?, 0)");
+        $stmt->execute([(string) $userId, (string) $panelCode]);
+
+        $stmt = $pdo->prepare("SELECT used_count FROM user_trial_usage WHERE user_id = ? AND panel_code = ? FOR UPDATE");
+        $stmt->execute([(string) $userId, (string) $panelCode]);
+        $used = (int) $stmt->fetchColumn();
+
+        if ($used >= $limit) {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $stmt = $pdo->prepare("UPDATE user_trial_usage SET used_count = used_count + 1 WHERE user_id = ? AND panel_code = ?");
+        $stmt->execute([(string) $userId, (string) $panelCode]);
+        $pdo->commit();
+        return true;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('Unable to reserve per-panel trial slot: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function releaseUserTrialSlot($userId, $panelCode)
+{
+    global $pdo;
+    if (!ensureUserTrialUsageTable()) return false;
+    try {
+        $stmt = $pdo->prepare("UPDATE user_trial_usage SET used_count = GREATEST(used_count - 1, 0) WHERE user_id = ? AND panel_code = ?");
+        $stmt->execute([(string) $userId, (string) $panelCode]);
+        return true;
+    } catch (Throwable $e) {
+        error_log('Unable to release per-panel trial slot: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function resetUserTrialUsage($userId)
+{
+    global $pdo;
+    if (!ensureUserTrialUsageTable()) return false;
+    try {
+        $stmt = $pdo->prepare("DELETE FROM user_trial_usage WHERE user_id = ?");
+        $stmt->execute([(string) $userId]);
+        return true;
+    } catch (Throwable $e) {
+        error_log('Unable to reset user trial usage: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function resetAllUserTrialUsage()
+{
+    global $pdo;
+    if (!ensureUserTrialUsageTable()) return false;
+    try {
+        $pdo->exec("DELETE FROM user_trial_usage");
+        return true;
+    } catch (Throwable $e) {
+        error_log('Unable to reset all trial usage: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function getUserTrialUsageSummary($userId)
+{
+    global $pdo;
+    if (!ensureUserTrialUsageTable()) return ['panels_used' => 0, 'total_used' => 0];
+
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(CASE WHEN used_count > 0 THEN 1 END) AS panels_used,
+                COALESCE(SUM(used_count), 0) AS total_used
+            FROM user_trial_usage
+            WHERE user_id = ?");
+        $stmt->execute([(string) $userId]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return [
+            'panels_used' => (int) ($result['panels_used'] ?? 0),
+            'total_used' => (int) ($result['total_used'] ?? 0),
+        ];
+    } catch (Throwable $e) {
+        error_log('Unable to read user trial usage summary: ' . $e->getMessage());
+        return ['panels_used' => 0, 'total_used' => 0];
+    }
+}
+
 function isValidInvitationCode($setting, $fromId, $verfy_status)
 {
 

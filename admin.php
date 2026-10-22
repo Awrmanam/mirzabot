@@ -197,18 +197,50 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     update("user", "Processing_value", $iduser, "id", $from_id);
     step('get_number_limit', $from_id);
 } elseif ($user['step'] == "get_number_limit") {
+    if (!preg_match('/^\d+$/', trim((string) $text))) {
+        sendmessage($from_id, "❌ فقط یک عدد صفر یا بزرگ‌تر ارسال کنید.", $backadmin, 'HTML');
+        return;
+    }
+    $trialLimit = max(0, (int) $text);
+    update("user", "limit_usertest", $trialLimit, "id", $user['Processing_value']);
     sendmessage($from_id, $textbotlang['Admin']['getlimitusertest']['setlimit'], $keyboardadmin, 'HTML');
-    $id_user_set = $text;
     step('home', $from_id);
-    update("user", "limit_usertest", $text, "id", $user['Processing_value']);
 } elseif ($text == $textbotlang['Admin']['getlimitusertest']['setlimitbtn'] && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['getlimitusertest']['limitall'], $backadmin, 'HTML');
     step('limit_usertest_allusers', $from_id);
 } elseif ($user['step'] == "limit_usertest_allusers") {
+    if (!preg_match('/^\d+$/', trim((string) $text))) {
+        sendmessage($from_id, "❌ فقط یک عدد صفر یا بزرگ‌تر ارسال کنید.", $backadmin, 'HTML');
+        return;
+    }
+    $trialLimit = max(0, (int) $text);
+    update("user", "limit_usertest", $trialLimit);
+    update("setting", "limit_usertest_all", $trialLimit);
     sendmessage($from_id, $textbotlang['Admin']['getlimitusertest']['setlimitall'], $keyboardadmin, 'HTML');
     step('home', $from_id);
-    update("user", "limit_usertest", $text);
-    update("setting", "limit_usertest_all", $text);
+} elseif (preg_match('/resetusertest_(\w+)/', $datain, $dataget)) {
+    $iduser = $dataget[1];
+    if (resetUserTrialUsage($iduser)) {
+        sendmessage($from_id, "✅ مصرف تست این کاربر برای همه پنل‌ها ریست شد.", null, 'HTML');
+    } else {
+        sendmessage($from_id, "❌ ریست مصرف تست کاربر انجام نشد. لاگ سرور را بررسی کنید.", null, 'HTML');
+    }
+} elseif ($text == "♻️ ریست مصرف تست همه کاربران" && $adminrulecheck['rule'] == "administrator") {
+    $confirmResetTrialKeyboard = json_encode([
+        'inline_keyboard' => [[
+            ['text' => "✅ بله، ریست شود", 'callback_data' => "confirm_reset_all_trial_usage"],
+            ['text' => "❌ لغو", 'callback_data' => "cancel_reset_all_trial_usage"],
+        ]],
+    ]);
+    sendmessage($from_id, "⚠️ آیا مطمئن هستید که مصرف تست تمام کاربران ریست شود؟\n\nفاکتورها و تاریخچه تست‌ها حذف نمی‌شوند.", $confirmResetTrialKeyboard, 'HTML');
+} elseif ($datain == "confirm_reset_all_trial_usage" && $adminrulecheck['rule'] == "administrator") {
+    if (resetAllUserTrialUsage()) {
+        Editmessagetext($from_id, $message_id, "✅ مصرف تست تمام کاربران با موفقیت ریست شد.", null, 'HTML');
+    } else {
+        Editmessagetext($from_id, $message_id, "❌ ریست مصرف تست کاربران انجام نشد. لاگ سرور را بررسی کنید.", null, 'HTML');
+    }
+} elseif ($datain == "cancel_reset_all_trial_usage" && $adminrulecheck['rule'] == "administrator") {
+    Editmessagetext($from_id, $message_id, "❌ عملیات ریست مصرف تست لغو شد.", null, 'HTML');
 } elseif ($text == "📯 تنظیمات کانال" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['channel']['description'], $channelkeyboard, 'HTML');
 } elseif ($text == $textbotlang['Admin']['Status']['btn'] || $datain == "stat_all_bot") {
@@ -4144,7 +4176,8 @@ $caption";
             [['text' => "💳 فعالسازی شماره کارت", 'callback_data' => "showcarduser-" . $id_user]],
             [['text' => "احراز هویت کاربر", 'callback_data' => "verify_" . $id_user], ['text' => "عدم احراز کاربر", 'callback_data' => "unverify-" . $id_user]],
             [['text' => "💳  غیرفعالسازی شماره کارت", 'callback_data' => "carduserhide-" . $id_user]],
-            [['text' => "🛒 افزودن سفارش", 'callback_data' => "addordermanualـ" . $id_user], ['text' => "➕ محدودیت اکانت تست", 'callback_data' => "limitusertest_" . $id_user]],
+            [['text' => "🛒 افزودن سفارش", 'callback_data' => "addordermanualـ" . $id_user], ['text' => "➕ سقف تست هر پنل", 'callback_data' => "limitusertest_" . $id_user]],
+            [['text' => "♻️ ریست تست‌های کاربر", 'callback_data' => "resetusertest_" . $id_user]],
             [['text' => $textbotlang['Admin']['ManageUser']['viewpaymentuser'], 'callback_data' => "viewpaymentuser_" . $id_user], ['text' => "انتقال حساب کاربری ", 'callback_data' => "transferaccount_" . $id_user]],
             [['text' => "💡 خاموش کردن اکانت", 'callback_data' => "disableconfig-" . $id_user], ['text' => "💡 روشن کردن اکانت", 'callback_data' => "activeconfig-" . $id_user]],
             [['text' => "📑 احراز عضویت کانال", 'callback_data' => "confirmchannel-" . $id_user], ['text' => "0️⃣ صفر کردن موجودی", 'callback_data' => "zerobalance-" . $id_user]],
@@ -4239,6 +4272,9 @@ $caption";
     } else {
         $text_expie_agent = "";
     }
+    $trialUsageSummary = getUserTrialUsageSummary($id_user);
+    $trialUsedPanels = $trialUsageSummary['panels_used'];
+    $trialUsedTotal = $trialUsageSummary['total_used'];
     $textinfouser = "👀 اطلاعات کاربر:
 
 🔗 اطلاعات کاربری کاربر
@@ -4249,7 +4285,8 @@ $caption";
 ⭕️ کد معرف کاربر : {$user['codeInvitation']}
 ⭕️ زمان عضویت کاربر : $userjoin
 ⭕️ آخرین زمان  استفاده کاربر از ربات : $lastmessage
-⭕️ محدودیت اکانت تست :  {$user['limit_usertest']} 
+⭕️ محدودیت تست در هر پنل :  {$user['limit_usertest']}
+⭕️ مصرف تست ثبت‌شده : $trialUsedTotal تست در $trialUsedPanels پنل
 ⭕️ وضعیت تایید قانون : $roll_Status
 ⭕️ شماره موبایل : <code>{$user['number']}</code>
 ⭕️ نوع کاربری : {$user['agent']}

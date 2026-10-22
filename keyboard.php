@@ -321,7 +321,8 @@ $setting_panel =  json_encode([
         [['text' => "✅ فعالسازی پنل تحت وب"]],
         [['text' => "🗑 بهینه سازی ربات "]],
         [['text' => "📝 تنظیم متن ربات"],['text' => "👨‍🔧 بخش ادمین"]],
-        [['text' => "➕ محدودیت ساخت اکانت تست برای همه"]],
+        [['text' => $textbotlang['Admin']['getlimitusertest']['setlimitbtn']],
+        [['text' => "♻️ ریست مصرف تست همه کاربران"]],
         [['text' => "💰 مبلغ عضویت نمایندگی"],['text' => "🖼 پس زمینه کیوآرکد"]],
         [['text' => "🔗 وبهوک مجدد ربات های نماینده"]],
         [['text' => $textbotlang['Admin']['backadmin']],['text' => $textbotlang['Admin']['backmenu']]]
@@ -794,14 +795,18 @@ $list_marzban_panel_userschange = json_encode($list_marzban_panel_users_change);
 
 
 //------------------  [ listpanelusers test ]----------------//
-    $stmt = $pdo->prepare("SELECT * FROM marzban_panel WHERE TestAccount = 'ONTestAccount' AND (agent = '{$users['agent']}' OR agent = 'all')");
-    $stmt->execute();
-    $list_marzban_panel_usertest = ['inline_keyboard' => []];
-    while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        if($result['hide_user'] != null and in_array($from_id,json_decode($result['hide_user'],true)))continue;
-            $list_marzban_panel_usertest['inline_keyboard'][] = [panelKeyboardButton($result, ['callback_data' => "locationtest_{$result['code_panel']}"])
-            ];
-    }
+$list_marzban_panel_usertest = ['inline_keyboard' => []];
+$eligibleTrialPanels = getUserEligibleTrialPanels(
+    $from_id,
+    $users['agent'] ?? 'f',
+    (int) ($users['limit_usertest'] ?? 0),
+    $admin_idss != 0
+);
+foreach ($eligibleTrialPanels as $result) {
+    $list_marzban_panel_usertest['inline_keyboard'][] = [
+        panelKeyboardButton($result, ['callback_data' => "locationtest_{$result['code_panel']}"])
+    ];
+}
 $list_marzban_panel_usertest['inline_keyboard'][] = [
     ['text' => $textbotlang['users']['backbtn'], 'callback_data' => "backuser"],
 ];
