@@ -1,5 +1,5 @@
 #!/bin/bash
-readonly MIRZA_SOURCE_BRANCH="fix/installer-premium-emoji-activation"
+readonly MIRZA_SOURCE_BRANCH="rebecca-support"
 readonly MIRZA_SOURCE_ARCHIVE_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"
 readonly MIRZA_SOURCE_INSTALLER_URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/refs/heads/${MIRZA_SOURCE_BRANCH}/install.sh"
 
@@ -1506,7 +1506,7 @@ function update_bot() {
     echo -e "\e[36mUpdating Mirza Pro Bot safely...\033[0m"
 
     BOT_DIR="/var/www/html/mirzaprobotconfig"
-    ZIP_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip"
+    ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
     WORK_DIR="/tmp/mirza-update-$TIMESTAMP"
     DOWNLOAD_DIR="$WORK_DIR/download"

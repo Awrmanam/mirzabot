@@ -138,5 +138,7 @@ jobs:
           grep -Fq 'styledEnhanceAdminKeyboard' keyboard.php
           grep -Fq 'emoji_key' ticket_system.php
           grep -Fq 'ticket_install.php' table.php
-          test "$(grep -Fc 'https://github.com/Awrmanam/mirzabot/archive/refs/heads/rebecca-support.zip' install.sh)" -eq 3
-          grep -Fq 'https://raw.githubusercontent.com/Awrmanam/mirzabot/rebecca-support/install.sh' install.sh
+          grep -Fq 'readonly MIRZA_SOURCE_BRANCH="rebecca-support"' install.sh
+          grep -Fq 'readonly MIRZA_SOURCE_ARCHIVE_URL="https://github.com/Awrmanam/mirzabot/archive/refs/heads/${MIRZA_SOURCE_BRANCH}.zip"' install.sh
+          grep -Fq 'readonly MIRZA_SOURCE_INSTALLER_URL="https://raw.githubusercontent.com/Awrmanam/mirzabot/refs/heads/${MIRZA_SOURCE_BRANCH}/install.sh"' install.sh
+          grep -Fq 'ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"' install.sh

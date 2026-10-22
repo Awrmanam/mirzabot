@@ -29,10 +29,10 @@ foreach ([
 }
 
 installerStaticAssert(
-    strpos($installer, 'MIRZA_SOURCE_BRANCH="fix/installer-premium-emoji-activation"') !== false
+    strpos($installer, 'MIRZA_SOURCE_BRANCH="rebecca-support"') !== false
         && strpos($installer, 'ZIP_URL="$MIRZA_SOURCE_ARCHIVE_URL"') !== false
-        && strpos($installer, 'rebecca-support.zip') === false,
-    'Installer package source does not point to the Premium Emoji integration branch.'
+        && strpos($installer, 'MIRZA_SOURCE_INSTALLER_URL=') !== false,
+    'Installer, self-update, and package update must use the production rebecca-support branch.'
 );
 
 foreach ([
@@ -83,8 +83,9 @@ $updateStart = strpos($installer, 'function update_bot()');
 $updateEnd = strpos($installer, 'function remove_bot()', $updateStart);
 $updateBlock = substr($installer, $updateStart, $updateEnd - $updateStart);
 installerStaticAssert(
-    strpos($updateBlock, 'cp "$CONFIG_PATH" "$TEMP_CONFIG"') !== false
-        && strpos($updateBlock, 'mv "$TEMP_CONFIG" "$CONFIG_PATH"') !== false,
+    strpos($updateBlock, 'CONFIG_BACKUP=') !== false
+        && strpos($updateBlock, 'cp -a "$BOT_DIR/config.php" "$CONFIG_BACKUP"') !== false
+        && strpos($updateBlock, 'cp -a "$CONFIG_BACKUP" "$BOT_DIR/config.php"') !== false,
     'Update flow no longer preserves the existing config.php.'
 );
 
