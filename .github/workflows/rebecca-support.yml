@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rebecca-support
+      - fix/safe-updater-preserve-current
   workflow_dispatch:
 
 permissions:
@@ -33,6 +34,7 @@ jobs:
           php -l scripts/cleanup_custom_emoji_usage.php
           php -l tests/custom_emoji_performance.php
           php -l tests/performance_static_checks.php
+          php -l tests/regression_safety_checks.php
 
       - name: Validate installer syntax
         run: bash -n install.sh
@@ -77,6 +79,9 @@ jobs:
           php tests/custom_emoji_performance.php enabled
           php tests/custom_emoji_performance.php usage
           php tests/performance_static_checks.php
+
+      - name: Validate update and regression safety invariants
+        run: php tests/regression_safety_checks.php
 
       - name: Verify Rebecca integration and fork-pinned installer
         shell: bash
