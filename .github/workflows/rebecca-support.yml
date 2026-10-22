@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - rebecca-support
-      - integration/current-plus-per-panel-trials
   workflow_dispatch:
 
 permissions:
