@@ -321,7 +321,7 @@ $setting_panel =  json_encode([
         [['text' => "✅ فعالسازی پنل تحت وب"]],
         [['text' => "🗑 بهینه سازی ربات "]],
         [['text' => "📝 تنظیم متن ربات"],['text' => "👨‍🔧 بخش ادمین"]],
-        [['text' => $textbotlang['Admin']['getlimitusertest']['setlimitbtn']],
+        [['text' => $textbotlang['Admin']['getlimitusertest']['setlimitbtn']]],
         [['text' => "♻️ ریست مصرف تست همه کاربران"]],
         [['text' => "💰 مبلغ عضویت نمایندگی"],['text' => "🖼 پس زمینه کیوآرکد"]],
         [['text' => "🔗 وبهوک مجدد ربات های نماینده"]],
