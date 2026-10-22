@@ -2075,7 +2075,6 @@ function sendMessageService($panel_info, $config, $sub_link, $username_service, 
         }
     }
 }
-
 /**
  * Free-trial usage is tracked per user + stable panel code.
  * user.limit_usertest is the configured maximum number of trials per panel.
@@ -2143,9 +2142,7 @@ function ensureUserTrialUsageTable()
                 $pdo->exec("UPDATE setting SET trial_usage_migrated = '1'");
                 $pdo->commit();
             } catch (Throwable $migrationError) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
+                if ($pdo->inTransaction()) $pdo->rollBack();
                 throw $migrationError;
             }
         }
@@ -2153,9 +2150,7 @@ function ensureUserTrialUsageTable()
         $ready = true;
         return true;
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('Unable to initialize per-panel trial usage: ' . $e->getMessage());
         return false;
     }
@@ -2165,7 +2160,6 @@ function getUserTrialUsage($userId, $panelCode)
 {
     global $pdo;
     if (!ensureUserTrialUsageTable()) return 0;
-
     $stmt = $pdo->prepare("SELECT used_count FROM user_trial_usage WHERE user_id = ? AND panel_code = ? LIMIT 1");
     $stmt->execute([(string) $userId, (string) $panelCode]);
     $used = $stmt->fetchColumn();
@@ -2196,7 +2190,6 @@ function getUserAccessibleTrialPanels($userId, $agent)
 function getUserEligibleTrialPanels($userId, $agent, $perPanelLimit, $bypassLimit = false)
 {
     global $pdo;
-
     $panels = getUserAccessibleTrialPanels($userId, $agent);
     if ($bypassLimit) return $panels;
 
@@ -2206,13 +2199,10 @@ function getUserEligibleTrialPanels($userId, $agent, $perPanelLimit, $bypassLimi
     $panelCodes = array_values(array_unique(array_map(function ($panel) {
         return (string) $panel['code_panel'];
     }, $panels)));
-
     $placeholders = implode(',', array_fill(0, count($panelCodes), '?'));
     $params = array_merge([(string) $userId], $panelCodes);
-    $stmt = $pdo->prepare("SELECT panel_code, used_count
-        FROM user_trial_usage
-        WHERE user_id = ?
-          AND panel_code IN ($placeholders)");
+    $stmt = $pdo->prepare("SELECT panel_code, used_count FROM user_trial_usage
+        WHERE user_id = ? AND panel_code IN ($placeholders)");
     $stmt->execute($params);
 
     $usageByPanel = [];
@@ -2221,15 +2211,13 @@ function getUserEligibleTrialPanels($userId, $agent, $perPanelLimit, $bypassLimi
     }
 
     return array_values(array_filter($panels, function ($panel) use ($usageByPanel, $limit) {
-        $panelCode = (string) $panel['code_panel'];
-        return ($usageByPanel[$panelCode] ?? 0) < $limit;
+        return ($usageByPanel[(string) $panel['code_panel']] ?? 0) < $limit;
     }));
 }
 
 function reserveUserTrialSlot($userId, $panelCode, $perPanelLimit)
 {
     global $pdo;
-
     $limit = max(0, (int) $perPanelLimit);
     if ($limit <= 0 || !ensureUserTrialUsageTable()) return false;
 
@@ -2303,12 +2291,10 @@ function getUserTrialUsageSummary($userId)
 {
     global $pdo;
     if (!ensureUserTrialUsageTable()) return ['panels_used' => 0, 'total_used' => 0];
-
     try {
         $stmt = $pdo->prepare("SELECT COUNT(CASE WHEN used_count > 0 THEN 1 END) AS panels_used,
                 COALESCE(SUM(used_count), 0) AS total_used
-            FROM user_trial_usage
-            WHERE user_id = ?");
+            FROM user_trial_usage WHERE user_id = ?");
         $stmt->execute([(string) $userId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return [
