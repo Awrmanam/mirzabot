@@ -40,7 +40,7 @@ function get_clinetsalireza($username,$namepanel){
     $curl = curl_init();
 
 curl_setopt_array($curl, array(
-  CURLOPT_URL => $marzban_list_get['url_panel'].'/xui/API/inbounds',
+  CURLOPT_URL => rtrim((string) $marzban_list_get['url_panel'], '/') . '/xui/API/inbounds',
   CURLOPT_RETURNTRANSFER => true,
   CURLOPT_ENCODING => '',
   CURLOPT_MAXREDIRS => 10,
@@ -102,7 +102,7 @@ function addClientalireza_singel($namepanel, $usernameac, $Expire,$Total, $Uuid,
         );
 
     $configpanel = json_encode($config,true);
-    $url = $marzban_list_get['url_panel'].'/xui/API/inbounds/addClient';
+    $url = rtrim((string) $marzban_list_get['url_panel'], '/') . '/xui/API/inbounds/addClient';
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
@@ -113,7 +113,7 @@ function updateClientalireza($namepanel, $username,array $config){
     $UsernameData = get_clinetsalireza($username,$namepanel)[0];
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
     $configpanel = json_encode($config,true);
-    $url = $marzban_list_get['url_panel'].'/xui/API/inbounds/updateClient/'.$UsernameData['id'];
+    $url = rtrim((string) $marzban_list_get['url_panel'], '/') . '/xui/API/inbounds/updateClient/' . $UsernameData['id'];
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
@@ -123,7 +123,7 @@ function updateClientalireza($namepanel, $username,array $config){
 function ResetUserDataUsagealirezasin($usernamepanel, $namepanel){
     $data_user = get_clinetsalireza($usernamepanel,$namepanel)[0];
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $namepanel,"select");
-    $url = $marzban_list_get['url_panel']."/xui/API/inbounds/{$marzban_list_get['inboundid']}/resetClientTraffic/".$data_user['email'];
+    $url = rtrim((string) $marzban_list_get['url_panel'], '/') . "/xui/API/inbounds/{$marzban_list_get['inboundid']}/resetClientTraffic/" . $data_user['email'];
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
@@ -133,7 +133,7 @@ function ResetUserDataUsagealirezasin($usernamepanel, $namepanel){
 function removeClientalireza_single($location,$username){
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $location,"select");
     $data_user = get_clinetsalireza($username,$location)[0];
-    $url = $marzban_list_get['url_panel']."/xui/API/inbounds/{$marzban_list_get['inboundid']}/delClient/".$data_user['id'];
+    $url = rtrim((string) $marzban_list_get['url_panel'], '/') . "/xui/API/inbounds/{$marzban_list_get['inboundid']}/delClient/" . $data_user['id'];
     $headers = array(
             'Accept: application/json',
             'Content-Type: application/json',
@@ -146,7 +146,7 @@ function get_onlineclialireza($name_panel,$username){
     login($marzban_list_get['code_panel']);
     $curl = curl_init();
 curl_setopt_array($curl, array(
-  CURLOPT_URL => $marzban_list_get['url_panel'].'/xui/API/inbounds/onlines',
+  CURLOPT_URL => rtrim((string) $marzban_list_get['url_panel'], '/') . '/xui/API/inbounds/onlines',
   CURLOPT_RETURNTRANSFER => true,
   CURLOPT_ENCODING => '',
   CURLOPT_MAXREDIRS => 10,

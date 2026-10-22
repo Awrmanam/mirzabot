@@ -36,4 +36,9 @@ alirezaCheck(
     'Reset/delete requests are not using the reauth helper.'
 );
 
-echo "[OK] Alireza API redirect/auth retry protection is present." . PHP_EOL;
+alirezaCheck(
+    substr_count($source, "rtrim((string) \$marzban_list_get['url_panel'], '/')") >= 6,
+    'Alireza API endpoints must normalize trailing slashes in url_panel.'
+);
+
+echo "[OK] Alireza API redirect/auth retry and URL normalization are present." . PHP_EOL;
