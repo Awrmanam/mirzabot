@@ -11,6 +11,7 @@ require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';
 require_once 'ticket_system.php';
+require_once __DIR__ . '/mirza_app_bridge.php';
 require_once 'keyboard.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';
@@ -397,6 +398,9 @@ if (styledHandleUpdate()) {
     return;
 }
 if (ticketHandleUpdate()) {
+    return;
+}
+if (mirzaAppTryHandle($text, $Chat_type, $from_id, $pdo)) {
     return;
 }
 if ($text == "/start" || $datain == "start" || $text == "start") {
