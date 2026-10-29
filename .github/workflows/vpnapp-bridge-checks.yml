@@ -1,6 +1,8 @@
 name: VPN app payment bridge checks
 
 on:
+  push:
+    branches: [fix/vpnapp-receipt-telegram-delivery-20261030]
   pull_request:
     branches: [feature/vpn-app-store-bridge-20261029]
     paths:
