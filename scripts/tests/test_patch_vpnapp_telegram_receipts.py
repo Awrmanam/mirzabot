@@ -16,7 +16,7 @@ class TestProductionReceiptPatch(unittest.TestCase):
             root = Path(tmp)
             live = root / "vpnapp.php"
             original = "<?php\n// Customized live code must survive\n" + module.OLD + (
-                "\n// Custom logic remains intact\n") + module.RECEIPT_OLD
+                "\n// Custom logic remains intact\n") + module.RECEIPT_OLD + module.ADMIN_OLD
             live.write_text(original)
             backup = module.patch(live, root / "backups")
             self.assertEqual(backup.read_text(), original)
@@ -25,6 +25,7 @@ class TestProductionReceiptPatch(unittest.TestCase):
             self.assertIn("Custom logic remains intact", modified)
             self.assertIn(module.NEW, modified)
             self.assertIn(module.RECEIPT_NEW, modified)
+            self.assertIn(module.ADMIN_NEW, modified)
             self.assertNotIn(module.OLD, modified)
 
     def test_mismatched_handler_aborts_without_any_update(self):
