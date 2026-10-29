@@ -1,5 +1,9 @@
 RewriteEngine On
 
+# Signed VPN app API must preserve its exact .php URL; 301 redirects
+# would reject HMAC-authenticated POSTs and break account synchronization.
+RewriteRule ^vpnapp\.php$ - [END]
+
 
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME} !-f
