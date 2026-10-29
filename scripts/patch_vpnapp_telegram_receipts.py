@@ -32,7 +32,7 @@ def patch(path: Path, backups: Path) -> Path:
     receipt_after = RECEIPT_NEW.encode("utf-8")
     admin_before = ADMIN_OLD.encode("utf-8")
     admin_after = ADMIN_NEW.encode("utf-8")
-    if (data.count(before) != 1 or data.count(receipt_before) != 1 or data.count(admin_before) != 1:
+    if (data.count(before) != 1 or data.count(receipt_before) != 1 or data.count(admin_before) != 1):
         raise RuntimeError("Live notifier, receipt or admin snapshot differs; nothing changed")
     backups.mkdir(parents=True, exist_ok=True, mode=0o700)
     backup = backups / ("vpnapp.php.before-telegram-" +
