@@ -267,6 +267,12 @@ function vpnappCardRenew(PDO $db, $u, $key, $username, $panelCode, $planCode) {
         'invoice_id'=>$invoice['id_invoice'],
         'result'=>['public'=>$result,'username'=>$username,
                   'panel_code'=>$panelCode,'plan_code'=>$planCode]]);
+    vpnappNotify('🛒 درخواست تمدید کارت‌به‌کارت از اپ'. "\n".
+        'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
+        'سرویس: '.htmlspecialchars($username,ENT_QUOTES,'UTF-8'). "\n".
+        'مبلغ: '.number_format($price).' تومان'. "\n".
+        'پیگیری: '.htmlspecialchars($paymentId,ENT_QUOTES,'UTF-8'). "\n".
+        'منتظر تصویر رسید مشتری', $u['id']);
     return $result;
 }
 
@@ -443,6 +449,13 @@ function vpnappCardOrder(PDO $db, $u, $plan, $panel, $key) {
         'payment_id'=>$paymentId,'status'=>'awaiting_receipt'];
     vpnappUpdate($db,$key,'awaiting_receipt',['payment_id'=>$paymentId,
         'invoice_id'=>$invoiceId,'result'=>$result]);
+    vpnappNotify('🛒 سفارش کارت‌به‌کارت جدید از اپ'. "\n".
+        'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
+        'پنل: '.htmlspecialchars($panel['name_panel'],ENT_QUOTES,'UTF-8'). "\n".
+        'پلن: '.htmlspecialchars($plan['name_product'],ENT_QUOTES,'UTF-8'). "\n".
+        'مبلغ: '.number_format($amount).' تومان'. "\n".
+        'پیگیری: '.htmlspecialchars($paymentId,ENT_QUOTES,'UTF-8'). "\n".
+        'منتظر تصویر رسید مشتری', $u['id']);
     return $result;
 }
 function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
