@@ -50,7 +50,7 @@ function vpnappSigned($raw, $headers, $secret, PDO $db) {
 }
 function vpnappUser(PDO $db, $id) {
     if (!is_string($id) || !preg_match('/^[1-9][0-9]{0,19}$/D',$id)) vpnappError(400,'Invalid account');
-    $stmt=$db->prepare("SELECT id,username,agent,Balance,token,User_Status,pricediscount,namecustom,
+    $stmt=$db->prepare("SELECT id,username,agent,Balance,User_Status,pricediscount,namecustom,
                         number_username,affiliates FROM user WHERE id=? LIMIT 1");
     $stmt->execute([$id]); $u=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$u || $u['User_Status']==='block') vpnappError(403,'Account blocked or unknown');
@@ -299,7 +299,14 @@ function vpnappExisting(PDO $db, $u, $key) {
 function vpnappNewOrder(PDO $db, $u, $kind, $key) {
     if (!is_string($key) || !preg_match('/^[0-9a-f-]{36}$/D',$key))
         vpnappError(400,'Invalid order key');
-    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders WHERE owner_id=? AND status IN ('processing','unknown','awaiting_receipt','waiting') AND created_at>?");
+    // Serialize checkouts from the same Mirza user, even with different
+    // client-generated UUIDs, so two requests cannot race the pending limit.
+    $lock=$db->prepare("SELECT GET_LOCK(?,10)");
+    $lock->execute(['vpnapp_account_'.$u['id']]);
+    if ((int)$lock->fetchColumn()!==1) vpnappError(409,'Checkout currently busy');
+    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders WHERE owner_id=?
+        AND (status='unknown' OR
+             (status IN ('processing','awaiting_receipt','waiting') AND created_at>?))");
     $stmt->execute([$u['id'],time()-86400]);
     if ((int)$stmt->fetchColumn()>0) vpnappError(409,'A previous order is still pending');
     $stmt=$db->prepare("INSERT INTO vpnapp_orders(external_id,owner_id,kind,status,created_at,updated_at) VALUES(?,?,?,?,?,?)");
