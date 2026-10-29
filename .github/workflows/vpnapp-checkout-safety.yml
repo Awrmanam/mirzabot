@@ -12,7 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: PHP syntax
-        run: php -l api/vpnapp.php
+        run: |
+          php -l api/vpnapp.php
+          php -l scripts/inspect_vpnapp_orders.php
       - name: Test surgical patchers preserving custom code
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_pending_orders.py' -v
