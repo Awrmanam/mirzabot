@@ -220,6 +220,16 @@ if (floor($TimeLastMessage / 60) >= 1) {
 }
 
 
+// The VPN app pairing command is separate from Mirza's existing Mini App.
+// Only authenticated private-chat commands pass the existing block/spam checks.
+if ($Chat_type === 'private' &&
+    preg_match('/^\\/app(?:@([A-Za-z0-9_]{5,32}))?$/D', trim((string)$text), $appCommand) &&
+    (!isset($appCommand[1]) || strcasecmp($appCommand[1], ltrim((string)$usernamebot, '@')) === 0)) {
+    require_once 'app_pairing.php';
+    mirzaAppPairingCommand($pdo, $from_id);
+    return;
+}
+
 if (strpos($text, "/start ") !== false && $user['step'] != "gettextSystemMessage") {
     $affiliatesid = explode(" ", $text)[1];
     if (!in_array($affiliatesid, ['start', "usertest", "/start", "buy", "help"])) {
