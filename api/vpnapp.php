@@ -223,6 +223,7 @@ function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode, 
     $db->prepare("UPDATE invoice SET Status='active',name_product=?,price_product=?
         WHERE id_user=? AND username=?")->execute([$plan['name_product'],$price,$u['id'],$username]);
     $result=['id'=>$key,'status'=>'fulfilled','service'=>$username,
+             'panel_name'=>$panel['name_panel'],'plan_name'=>$plan['name_product'],
              'amount_toman'=>$price];
     vpnappUpdate($db,$key,'fulfilled',['result'=>$result]);
     vpnappNotify('✅ تمدید از اپ VPN'. "\n".
@@ -271,9 +272,11 @@ function vpnappCardRenew(PDO $db, $u, $key, $username, $panelCode, $planCode) {
 
 function vpnappReceiptInfo(PDO $db, $u, $order) {
     $stmt=$db->prepare("SELECT o.external_id,o.kind,o.status,o.invoice_id,o.payment_id,o.result_json,
-        p.payment_Status AS payment_status,i.Status AS service_status
+        p.payment_Status AS payment_status,i.Status AS service_status,
+        i.username AS service_username,i.Service_location AS panel_name,
+        i.name_product AS plan_name,i.price_product AS invoice_amount
         FROM vpnapp_orders o LEFT JOIN Payment_report p ON p.id_order=o.payment_id
-        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id
+        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
         WHERE o.owner_id=? AND o.external_id=? LIMIT 1");
     $stmt->execute([$u['id'],$order]);$result=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$result) vpnappError(404,'Order not found');
@@ -286,8 +289,19 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
         }
     }
     unset($result['result_json']);
-    if ($result['kind']==='card' &&
-        $result['payment_status']==='paid' && $result['service_status']==='active') {
+    // Only the original invoice's *active* status confirms provisioning.
+    // An unknown panel outcome with an Unpaid invoice needs reconciliation;
+    // do NOT provision, refund or charge a second time here.
+    $isActive=$result['service_status']==='active';
+    $walletBought=in_array($result['kind'],['wallet','renewal'],true);
+    if ($isActive && $walletBought &&
+        in_array($result['status'],['unknown','processing','fulfilled'],true)) {
+        $result['status']='fulfilled';
+        $db->prepare("UPDATE vpnapp_orders SET status='fulfilled',updated_at=?
+            WHERE external_id=? AND owner_id=? AND status IN ('unknown','processing')")
+            ->execute([time(),$order,$u['id']]);
+    } elseif ($result['kind']==='card' &&
+        $result['payment_status']==='paid' && $isActive) {
         $result['status']='fulfilled';
     } elseif ($result['payment_status']==='reject' ||
               $result['payment_status']==='expire') {
@@ -295,6 +309,15 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
     } elseif ($result['kind']==='card' && $result['payment_status']==='waiting') {
         $result['status']='waiting';
     }
+    // Supply a friendly, verified outcome for the authenticated owner, not
+    // internal invoice or panel credentials.
+    if ($result['status']==='fulfilled' && $isActive) {
+        $result['service']=$result['service_username'];
+        if (!isset($result['amount_toman'])) {
+            $result['amount_toman']=(int)$result['invoice_amount'];
+        }
+    }
+    unset($result['invoice_amount'],$result['service_username']);
     return $result;
 }
 function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null) {
@@ -494,7 +517,15 @@ function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
         $db->exec("UPDATE setting SET numbercount=numbercount+1");
     }
     $result=['id'=>$key,'status'=>'fulfilled','invoice_id'=>$id,
-             'service'=>$username,'amount_toman'=>$amount];
+             'service'=>$username,'panel_name'=>$panel['name_panel'],
+             'plan_name'=>$plan['name_product'],'amount_toman'=>$amount];
+    // Subscription URLs can be returned only over authenticated app API.
+    // Other protocols may not have a directly importable V2Ray HTTPS URL.
+    if (isset($output['subscription_url']) &&
+        is_string($output['subscription_url']) &&
+        preg_match('/^https:\/\//i',$output['subscription_url'])) {
+        $result['subscription_url']=$output['subscription_url'];
+    }
     vpnappUpdate($db,$key,'fulfilled',['invoice_id'=>$id,'result'=>$result]);
     vpnappNotify('✅ خرید با کیف پول از اپ VPN'. "\n".
         'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
