@@ -114,7 +114,7 @@ function mirzaAppPairingSendToIran($telegramId, array $services)
 function mirzaAppPairingCommand(PDO $pdo, $telegramId)
 {
     if (!mirzaAppPairingEnabled()) {
-        sendmessage($telegramId, 'اتصال حساب به اپ هنوز فعال نشده است. لطفاً بعداً امتحان کنید.');
+        sendmessage($telegramId, 'اتصال حساب به اپ هنوز فعال نشده است. لطفاً بعداً امتحان کنید.', null, 'HTML');
         return;
     }
     try {
@@ -133,7 +133,9 @@ function mirzaAppPairingCommand(PDO $pdo, $telegramId)
         // No authentication tokens, codes or sensitive response are logged.
         sendmessage(
             $telegramId,
-            'در حال حاضر دریافت کد اتصال ممکن نیست یا درخواست جدید خیلی زود ثبت شده است. لطفاً کمی بعد دوباره امتحان کنید.'
+            'در حال حاضر دریافت کد اتصال ممکن نیست یا درخواست جدید خیلی زود ثبت شده است. لطفاً کمی بعد دوباره امتحان کنید.',
+            null,
+            'HTML'
         );
     }
 }
