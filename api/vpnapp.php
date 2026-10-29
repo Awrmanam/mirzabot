@@ -637,6 +637,27 @@ function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
     return $result;
 }
 
+/** Authenticated backend-admin snapshot. Read-only; never triggers payments or panels. */
+function vpnappAdminSnapshot(PDO $db) {
+    $linked=(int)$db->query("SELECT COUNT(DISTINCT owner_id) FROM vpnapp_orders")->fetchColumn();
+    $total=(int)$db->query("SELECT COUNT(*) FROM vpnapp_orders")->fetchColumn();
+    $pending=(int)$db->query("SELECT COUNT(*) FROM vpnapp_orders
+        WHERE status IN ('awaiting_receipt','waiting','unknown','processing')")->fetchColumn();
+    $orders=$db->query("SELECT o.external_id AS id,o.owner_id AS telegram_id,
+        o.kind,o.status,o.created_at,o.updated_at,
+        i.username AS service_username,i.Service_location AS panel_name,
+        i.name_product AS plan_name,i.price_product AS amount_toman,
+        p.payment_Status AS payment_status
+        FROM vpnapp_orders o
+        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
+        LEFT JOIN Payment_report p ON p.id_order=o.payment_id AND p.id_user=o.owner_id
+        ORDER BY o.created_at DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+    $panels=$db->query("SELECT name_panel,type FROM marzban_panel
+        ORDER BY name_panel LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+    return ['ok'=>true,'orders_total'=>$total,'pending_orders'=>$pending,
+        'buyers'=>$linked,'orders'=>$orders,'panels'=>$panels];
+}
+
 if (defined('MIRZA_VPNAPP_LIBRARY_ONLY') && MIRZA_VPNAPP_LIBRARY_ONLY) return;
 
 if (getenv('MIRZA_VPNAPP_BRIDGE_ENABLED')!=='1')
@@ -656,8 +677,14 @@ try {
     if (!vpnappSigned($raw,$signed,$secret,$pdo)) vpnappError(403,'Invalid signature');
     $input=json_decode($raw,true);
     if (!is_array($input)) vpnappError(400,'Invalid request');
-    $u=vpnappUser($pdo,(string)($input['telegram_id']??''));
     $action=$input['action']??'';
+    // This action is available only to a holder of the server-side HMAC key.
+    // No public/customer HTTP endpoint exposes it; it cannot mutate funds.
+    if ($action==='admin_snapshot' &&
+        (string)($input['telegram_id']??'')==='0') {
+        vpnappReply(200,vpnappAdminSnapshot($pdo));
+    }
+    $u=vpnappUser($pdo,(string)($input['telegram_id']??''));
     if ($action==='account') vpnappReply(200,['ok'=>true,'telegram_id'=>(string)$u['id'],
         'balance_toman'=>(int)$u['Balance'],'username'=>$u['username'],
         'agent'=>$u['agent'],'blocked'=>false]);
