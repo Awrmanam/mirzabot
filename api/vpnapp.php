@@ -349,8 +349,8 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
     $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $chatId=trim((string)($setting['Channel_Report']??''));
     $botToken=trim((string)($APIKEY??''));
-    if ($chatId==='' || $botToken==='') {
-        error_log('[vpnapp] Telegram notice skipped: missing report group or bot token');
+    if ($botToken==='') {
+        error_log('[vpnapp] Telegram notice skipped: missing bot token');
         return false;
     }
     $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
@@ -367,9 +367,9 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
                     ['text'=>'مسدودسازی','callback_data'=>'blockuserfake_'.$buttonId]];
     }
 
-    $send=function($withThread, $attachment) use
-        ($chatId,$botToken,$thread,$buttons,$text,$photo) {
-        $fields=['chat_id'=>$chatId,'parse_mode'=>'HTML'];
+    $send=function($destination, $withThread, $attachment) use
+        ($botToken,$thread,$buttons,$text,$photo) {
+        $fields=['chat_id'=>$destination,'parse_mode'=>'HTML'];
         if ($withThread && $thread) $fields['message_thread_id']=$thread;
         if ($buttons) $fields['reply_markup']=json_encode(
             ['inline_keyboard'=>$buttons],JSON_UNESCAPED_UNICODE);
@@ -401,19 +401,39 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         return [$ok,$status,substr($error,0,220)];
     };
 
-    [$ok,$http,$error]=$send(true,$photo!==null);
-    if ($ok) return true;
-    error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
-    // A forum topic can be deleted or inaccessible while the group still
-    // works; retry to the configured group's general chat in that case.
-    if ($thread && $http===400 &&
-        (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
-        [$ok,$http,$error]=$send(false,$photo!==null);
-        if ($ok) {
-            error_log('[vpnapp] Telegram report sent to group without invalid topic');
-            return true;
+    // First use Mirza's configured payment report topic. A broken topic must
+    // not swallow a customer's receipt, so retry the general group once.
+    if ($chatId!=='') {
+        [$ok,$http,$error]=$send($chatId,true,$photo!==null);
+        if ($ok) return true;
+        error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
+        if ($thread && $http===400 &&
+            (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
+            [$ok,$http,$error]=$send($chatId,false,$photo!==null);
+            if ($ok) return true;
+            error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
         }
-        error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+    } else {
+        error_log('[vpnapp] Payment report group not configured; trying admin private chats');
+    }
+
+    // Mirror the existing bot's admin authorization table. Only fall back
+    // when the normal report destination failed; avoid duplicate alerts.
+    // Admins must have started the bot for Telegram to accept private sends.
+    try {
+        $admins=$pdo->query("SELECT id_admin FROM admin LIMIT 10")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($admins as $adminId) {
+            $adminId=trim((string)$adminId);
+            if (!preg_match('/^[1-9][0-9]{0,19}$/D',$adminId)) continue;
+            [$ok,$http,$error]=$send($adminId,false,$photo!==null);
+            if ($ok) {
+                error_log('[vpnapp] Telegram report delivered via authorized admin fallback');
+                return true;
+            }
+            error_log('[vpnapp] Admin fallback delivery failed: HTTP '.$http.'; '.$error);
+        }
+    } catch (Throwable $e) {
+        error_log('[vpnapp] Telegram admin fallback could not read admin destinations');
     }
     return false;
 }
