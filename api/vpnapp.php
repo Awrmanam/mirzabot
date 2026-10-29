@@ -336,20 +336,24 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
     unset($result['external_id'],$result['invoice_amount'],$result['service_username']);
     return $result;
 }
+/**
+ * Best-effort notification to Mirza's existing payment report group.
+ * Never change financial/order state based on Telegram delivery.
+ * Log Telegram errors (without secrets) for operational troubleshooting.
+ */
 function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null) {
     global $pdo, $APIKEY;
     $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-    if (!($setting['Channel_Report']??'') || !$APIKEY) {
-        error_log('[vpnapp] Telegram report group or bot token is not configured');
+    $chatId=trim((string)($setting['Channel_Report']??''));
+    $botToken=trim((string)($APIKEY??''));
+    if ($chatId==='' || $botToken==='') {
+        error_log('[vpnapp] Telegram notice skipped: missing report group or bot token');
         return false;
     }
     $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
     $topic->execute();$thread=$topic->fetchColumn();
-    $fields=['chat_id'=>$setting['Channel_Report'],'caption'=>$text,'text'=>$text,
-             'parse_mode'=>'HTML'];
-    if ($thread) $fields['message_thread_id']=$thread;
+    $buttons=[];
     if ($buttonId) {
-        $buttons=[];
         if ($paymentId && preg_match('/^[0-9a-f]{10}$/D',(string)$paymentId)) {
             $buttons[]=[
                 ['text'=>'✅ تأیید رسید','callback_data'=>'Confirm_pay_'.$paymentId],
@@ -358,41 +362,55 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         }
         $buttons[]=[['text'=>'مدیریت مشتری','callback_data'=>'manageuser_'.$buttonId],
                     ['text'=>'مسدودسازی','callback_data'=>'blockuserfake_'.$buttonId]];
-        $fields['reply_markup']=json_encode(['inline_keyboard'=>$buttons]);
     }
-    if ($photo) {
-        unset($fields['text']);$fields['photo']=new CURLFile($photo);
-        $method='sendPhoto';
-    } else {
-        unset($fields['caption']);$method='sendMessage';
-    }
-    // Only retry without the thread when Telegram explicitly rejects the
-    // topic. Do not re-send on timeouts (an unknown first send may succeed).
-    for ($attempt=0;$attempt<2;$attempt++) {
-        $ch=curl_init('https://api.telegram.org/bot'.$APIKEY.'/'.$method);
+
+    $send=function($withThread, $attachment) use
+        ($chatId,$botToken,$thread,$buttons,$text,$photo) {
+        $fields=['chat_id'=>$chatId,'parse_mode'=>'HTML'];
+        if ($withThread && $thread) $fields['message_thread_id']=$thread;
+        if ($buttons) $fields['reply_markup']=json_encode(
+            ['inline_keyboard'=>$buttons],JSON_UNESCAPED_UNICODE);
+        if ($attachment) {
+            $mime=(new finfo(FILEINFO_MIME_TYPE))->file($photo);
+            $mime=$mime==='image/png'?'image/png':'image/jpeg';
+            $filename=$mime==='image/png'?'receipt.png':'receipt.jpg';
+            $fields['photo']=new CURLFile($photo,$mime,$filename);
+            $fields['caption']=$text;
+            $method='sendPhoto';
+        } else {
+            $fields['text']=$text;
+            $method='sendMessage';
+        }
+        $ch=curl_init('https://api.telegram.org/bot'.$botToken.'/'.$method);
+        if ($ch===false) return [false,0,'curl_init'];
         curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$fields,
-            CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>4,CURLOPT_TIMEOUT=>12]);
-        $body=curl_exec($ch);
-        $errno=curl_errno($ch);
-        $http=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+            CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>5,
+            CURLOPT_TIMEOUT=>16]);
+        $response=curl_exec($ch);
+        $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+        $curlError=curl_error($ch);
         curl_close($ch);
-        if ($errno || $body===false) {
-            error_log('[vpnapp] Telegram '.$method.' connection failed (curl '.$errno.')');
-            return false;
+        $parsed=is_string($response)?json_decode($response,true):null;
+        $ok=$status===200 && is_array($parsed) && ($parsed['ok']??false)===true;
+        $error=$curlError?:(
+            is_array($parsed)?(string)($parsed['description']??'Telegram rejected')
+            :'No Telegram JSON response');
+        return [$ok,$status,substr($error,0,220)];
+    };
+
+    [$ok,$http,$error]=$send(true,$photo!==null);
+    if ($ok) return true;
+    error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
+    // A forum topic can be deleted or inaccessible while the group still
+    // works; retry to the configured group's general chat in that case.
+    if ($thread && $http===400 &&
+        (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
+        [$ok,$http,$error]=$send(false,$photo!==null);
+        if ($ok) {
+            error_log('[vpnapp] Telegram report sent to group without invalid topic');
+            return true;
         }
-        $decoded=json_decode($body,true);
-        if ($http===200 && is_array($decoded) && ($decoded['ok']??false)===true) return true;
-        $description=is_array($decoded)?(string)($decoded['description']??''):'';
-        if ($attempt===0 && isset($fields['message_thread_id']) &&
-            $http===400 && (
-                stripos($description,'thread')!==false ||
-                stripos($description,'topic')!==false)) {
-            unset($fields['message_thread_id']);
-            continue;
-        }
-        error_log('[vpnapp] Telegram '.$method.' rejected (HTTP '.$http.'): '.
-            substr($description,0,160));
-        return false;
+        error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
     }
     return false;
 }
