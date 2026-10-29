@@ -330,7 +330,7 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
             vpnappNotify('🧾 رسید خرید از اپ VPN'. "\n".
                 'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
                 'پیگیری: '.htmlspecialchars($order['payment_id'],ENT_QUOTES,'UTF-8'). "\n".
-                'وضعیت: منتظر تأیید خودکار میرزا', $u['id'],$tmp);
+                'وضعیت: منتظر تأیید خودکار میرزا', $u['id'],$tmp,$order['payment_id']);
         } finally { @unlink($tmp); }
     }
     return ['status'=>'waiting'];
