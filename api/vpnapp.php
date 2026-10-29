@@ -293,7 +293,9 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
     // An unknown panel outcome with an Unpaid invoice needs reconciliation;
     // do NOT provision, refund or charge a second time here.
     $isActive=$result['service_status']==='active';
-    $walletBought=in_array($result['kind'],['wallet','renewal'],true);
+    // A renewal's invoice might already be active *before* extension,
+    // so its active status cannot prove that the renewal succeeded.
+    $walletBought=$result['kind']==='wallet';
     if ($isActive && $walletBought &&
         in_array($result['status'],['unknown','processing','fulfilled'],true)) {
         $result['status']='fulfilled';
