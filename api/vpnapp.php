@@ -429,11 +429,28 @@ function vpnappNewOrder(PDO $db, $u, $kind, $key) {
     $lock=$db->prepare("SELECT GET_LOCK(?,10)");
     $lock->execute(['vpnapp_account_'.$u['id']]);
     if ((int)$lock->fetchColumn()!==1) vpnappError(409,'Checkout currently busy');
+    // Uncertain wallet/panel operations must be reconciled before another
+    // checkout, so a timeout never accidentally charges the user twice.
+    // A card receipt already submitted for manual review is different:
+    // keeping its review open must not lock all unrelated new purchases.
     $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders WHERE owner_id=?
         AND (status='unknown' OR
-             (status IN ('processing','awaiting_receipt','waiting') AND created_at>?))");
+             (status IN ('processing','awaiting_receipt') AND created_at>?))");
     $stmt->execute([$u['id'],time()-86400]);
-    if ((int)$stmt->fetchColumn()>0) vpnappError(409,'A previous order is still pending');
+    if ((int)$stmt->fetchColumn()>0)
+        vpnappError(409,'A previous order needs reconciliation before checkout');
+    // Limit unreviewed card receipts and rapid repeat purchases; never
+    // approve, delete or mutate any of those existing payment records.
+    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders
+        WHERE owner_id=? AND status='waiting' AND created_at>?");
+    $stmt->execute([$u['id'],time()-86400]);
+    if ((int)$stmt->fetchColumn()>=3)
+        vpnappError(429,'Too many receipts awaiting review today');
+    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders
+        WHERE owner_id=? AND created_at>?");
+    $stmt->execute([$u['id'],time()-86400]);
+    if ((int)$stmt->fetchColumn()>=10)
+        vpnappError(429,'Daily checkout limit reached');
     $stmt=$db->prepare("INSERT INTO vpnapp_orders(external_id,owner_id,kind,status,created_at,updated_at) VALUES(?,?,?,?,?,?)");
     $stmt->execute([$key,$u['id'],$kind,'processing',time(),time()]);
 }
