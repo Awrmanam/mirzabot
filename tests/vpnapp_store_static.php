@@ -14,6 +14,8 @@ check(strpos($gateway,'vpnapp_orders')!==false, 'idempotency missing');
 check(strpos($gateway,'getconfigafterpay|')!==false, 'legacy paid purchase pipeline missing');
 check(strpos($gateway,"'cart to cart'")!==false, 'legacy receipt channel missing');
 check(strpos($gateway,"'waiting'")!==false, 'legacy auto-confirm pickup missing');
+check(strpos($gateway,'SELECT id_admin FROM admin')!==false, 'authorized receipt admin fallback missing');
+check(strpos($gateway,'notification_delivered')!==false, 'receipt delivery status missing');
 check(strpos($gateway,"'User_Status'")!==false, 'blocked user handling missing');
 check(strpos($gateway,'auth/')===false, 'unexpected public auth route');
 check(strpos($gateway,'botapi.php')===false, 'must not load Telegram webhook parser');
