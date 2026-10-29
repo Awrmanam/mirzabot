@@ -709,7 +709,7 @@ function vpnappAdminSnapshot(PDO $db) {
     $pending=(int)$db->query("SELECT COUNT(*) FROM vpnapp_orders
         WHERE status IN ('awaiting_receipt','waiting','unknown','processing')")->fetchColumn();
     $orders=$db->query("SELECT o.external_id AS id,o.owner_id AS telegram_id,
-        o.kind,o.status,o.created_at,o.updated_at,
+        o.kind,o.status,o.created_at,o.updated_at,o.result_json,
         i.username AS service_username,i.Service_location AS panel_name,
         i.name_product AS plan_name,i.price_product AS amount_toman,
         p.payment_Status AS payment_status
@@ -717,6 +717,14 @@ function vpnappAdminSnapshot(PDO $db) {
         LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
         LEFT JOIN Payment_report p ON p.id_order=o.payment_id AND p.id_user=o.owner_id
         ORDER BY o.created_at DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($orders as &$entry) {
+        $info=json_decode((string)($entry['result_json']??''),true);
+        $entry['receipt_notice_sent']=is_array($info) && !empty($info['receipt_notice_sent']);
+        $entry['receipt_send_attempts']=is_array($info)
+            ? (int)($info['receipt_send_attempts']??0) : 0;
+        unset($entry['result_json']); // Never expose private order payloads.
+    }
+    unset($entry);
     $panels=$db->query("SELECT name_panel,type FROM marzban_panel
         ORDER BY name_panel LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
     return ['ok'=>true,'orders_total'=>$total,'pending_orders'=>$pending,
