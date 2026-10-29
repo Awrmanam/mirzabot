@@ -146,7 +146,7 @@ function vpnappServices(PDO $db, $u) {
     }
     return $services;
 }
-function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode) {
+function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode, $existingOrder = false) {
     if (!is_string($username) || strlen($username)>128 || $username==='') vpnappError(400,'Invalid service');
     $stmt=$db->prepare("SELECT * FROM invoice WHERE id_user=? AND username=? AND Status!='Unpaid' LIMIT 1");
     $stmt->execute([$u['id'],$username]);$inv=$stmt->fetch(PDO::FETCH_ASSOC);
@@ -157,7 +157,7 @@ function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode) 
     $price=(int)round((int)$plan['price_product']*(100-(int)$u['pricediscount'])/100);
     if ($price<=0 || $price>1000000) vpnappError(400,'Renewal amount unsupported');
     // A pending external operation is not retried by changing the client key.
-    vpnappNewOrder($db,$u,'renewal',$key);
+    if (!$existingOrder) vpnappNewOrder($db,$u,'renewal',$key);
     $reserve=$db->prepare("UPDATE user SET Balance=Balance-? WHERE id=? AND Balance>=? AND User_Status!='block'");
     $reserve->execute([$price,$u['id'],$price]);
     if ($reserve->rowCount()!==1) {
@@ -192,6 +192,43 @@ function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode) 
         'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
         'سرویس: '.htmlspecialchars($username,ENT_QUOTES,'UTF-8'). "\n".
         'مبلغ: '.number_format($price).' تومان',$u['id']);
+    return $result;
+}
+
+function vpnappCardRenew(PDO $db, $u, $key, $username, $panelCode, $planCode) {
+    if (!is_string($username) || strlen($username)>128 || $username==='')
+        vpnappError(400,'Invalid renewal service');
+    $stmt=$db->prepare("SELECT * FROM invoice WHERE id_user=? AND username=?
+        AND Status!='Unpaid' LIMIT 1");
+    $stmt->execute([$u['id'],$username]);$invoice=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$invoice) vpnappError(404,'Service is not owned');
+    $panel=vpnappPanel($db,$panelCode);
+    if ($panel['name_panel']!==$invoice['Service_location'])
+        vpnappError(400,'Service is on another panel');
+    $plan=vpnappProduct($db,$u['agent'],$panel,$planCode);
+    $price=(int)round((int)$plan['price_product']*(100-(int)$u['pricediscount'])/100);
+    $cap=(int)(getenv('MIRZA_VPNAPP_CARD_CAP_TOMAN')?:150000);
+    if ($price<1000 || $price>$cap) vpnappError(400,'Card renewal amount unsupported');
+    $card=$db->query("SELECT cardnumber,namecard FROM card_number ORDER BY RAND() LIMIT 1")
+        ->fetch(PDO::FETCH_ASSOC);
+    if (!$card || !preg_match('/^[0-9]{16}$/D',(string)$card['cardnumber']))
+        vpnappError(503,'Card not configured');
+    vpnappNewOrder($db,$u,'renewal_card',$key);
+    $paymentId=bin2hex(random_bytes(5));
+    // The original DirectPayment fallback tops up the Mirza wallet. A separate
+    // idempotent cron worker then spends that credit and renews the owned
+    // service, avoiding the legacy getextenduser branch that clears balance.
+    $db->prepare("INSERT INTO Payment_report
+        (id_user,id_order,time,price,payment_Status,Payment_Method,id_invoice)
+        VALUES(?,?,?,?, 'Unpaid','cart to cart',?)")->execute([
+        $u['id'],$paymentId,date('Y/m/d H:i:s'),$price,'vpnapp_renew|'.$username]);
+    $result=['id'=>$key,'method'=>'card','amount_toman'=>$price,
+        'card_number'=>$card['cardnumber'],'card_holder'=>$card['namecard'],
+        'payment_id'=>$paymentId,'status'=>'awaiting_receipt'];
+    vpnappUpdate($db,$key,'awaiting_receipt',['payment_id'=>$paymentId,
+        'invoice_id'=>$invoice['id_invoice'],
+        'result'=>['public'=>$result,'username'=>$username,
+                  'panel_code'=>$panelCode,'plan_code'=>$planCode]]);
     return $result;
 }
 
@@ -260,7 +297,7 @@ function vpnappNewOrder(PDO $db, $u, $kind, $key) {
     $stmt->execute([$key,$u['id'],$kind,'processing',time(),time()]);
 }
 function vpnappUpdate(PDO $db, $key, $status, $fields=[]) {
-    $stmt=$db->prepare("UPDATE vpnapp_orders SET status=?,payment_id=?,invoice_id=?,result_json=?,updated_at=? WHERE external_id=?");
+    $stmt=$db->prepare("UPDATE vpnapp_orders SET status=?,payment_id=COALESCE(?,payment_id),invoice_id=COALESCE(?,invoice_id),result_json=COALESCE(?,result_json),updated_at=? WHERE external_id=?");
     $stmt->execute([$status,$fields['payment_id']??null,$fields['invoice_id']??null,
         isset($fields['result'])?json_encode($fields['result'],JSON_UNESCAPED_UNICODE):null,time(),$key]);
 }
@@ -414,6 +451,8 @@ function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
     return $result;
 }
 
+if (defined('MIRZA_VPNAPP_LIBRARY_ONLY') && MIRZA_VPNAPP_LIBRARY_ONLY) return;
+
 if (getenv('MIRZA_VPNAPP_BRIDGE_ENABLED')!=='1')
     vpnappError(503,'VPN app integration is disabled');
 $secret=(string)getenv('MIRZA_APP_BRIDGE_SECRET');
@@ -447,6 +486,20 @@ try {
         vpnappReply(200,['ok'=>true,'receipt'=>vpnappSubmitReceipt($pdo,$u,
             (string)($input['order_id']??''),$input['image_base64']??'')]);
     }
+    if ($action==='renew_card') {
+        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+            vpnappError(403,'Checkout disabled');
+        $key=(string)($input['order_id']??'');
+        $previous=vpnappExisting($pdo,$u,$key);
+        if ($previous) {
+            $r=json_decode($previous['result_json']??'null',true);
+            if (is_array($r) && isset($r['public'])) $r=$r['public'];
+            vpnappReply(200,['ok'=>true,'order'=>$r?:[
+                'id'=>$key,'status'=>$previous['status']]]);
+        }
+        vpnappReply(200,['ok'=>true,'order'=>vpnappCardRenew($pdo,$u,$key,
+            $input['username']??null,$input['panel_code']??null,$input['plan_code']??null)]);
+    }
     if ($action==='renew_wallet') {
         if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
             vpnappError(403,'Checkout disabled');
@@ -467,6 +520,7 @@ try {
         $previous=vpnappExisting($pdo,$u,$key);
         if ($previous) {
             $result=json_decode($previous['result_json']??'null',true);
+            if (is_array($result) && isset($result['public'])) $result=$result['public'];
             vpnappReply(200,['ok'=>true,'order'=>$result?:[
                 'id'=>$key,'status'=>$previous['status']]]);
         }
