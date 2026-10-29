@@ -98,14 +98,19 @@ function vpnappCatalog(PDO $db, $u) {
     return $catalog;
 }
 function vpnappInvoices(PDO $db, $u) {
-    $stmt=$db->prepare("SELECT id_invoice,username,Service_location,name_product,Volume,Service_time,
-        Status,time_sell,price_product FROM invoice WHERE id_user=? AND Status!='Unpaid'
-        ORDER BY time_sell DESC LIMIT 100");
+    $stmt=$db->prepare("SELECT i.id_invoice,i.username,i.Service_location,i.name_product,
+        i.Volume,i.Service_time,i.Status,i.time_sell,i.price_product,
+        p.code_panel,p.name_panel AS panel_name,p.type AS provider_type
+        FROM invoice i LEFT JOIN marzban_panel p ON p.name_panel=i.Service_location
+        WHERE i.id_user=? AND i.Status!='Unpaid'
+        ORDER BY i.time_sell DESC LIMIT 100");
     $stmt->execute([$u['id']]);
     $items=[];
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $inv) {
         $items[]=['id'=>$inv['id_invoice'],'username'=>$inv['username'],
-            'panel'=>$inv['Service_location'],'plan_name'=>$inv['name_product'],
+            'panel'=>$inv['Service_location'],
+            'panel_code'=>$inv['code_panel'],'panel_name'=>$inv['panel_name']?:$inv['Service_location'],
+            'provider_type'=>$inv['provider_type'],'plan_name'=>$inv['name_product'],
             'quota_gb'=>(float)$inv['Volume'],'days'=>(int)$inv['Service_time'],
             'status'=>$inv['Status'],'created_at'=>(int)$inv['time_sell']];
     }
@@ -113,7 +118,7 @@ function vpnappInvoices(PDO $db, $u) {
 }
 function vpnappServices(PDO $db, $u) {
     $stmt=$db->prepare("SELECT i.username,i.Service_location,i.name_product,i.Volume,i.Service_time,i.Status,
-        p.code_panel AS panel_code,p.type AS provider_type
+        p.code_panel AS panel_code,p.name_panel AS panel_name,p.type AS provider_type
         FROM invoice i LEFT JOIN marzban_panel p ON p.name_panel=i.Service_location
         WHERE i.id_user=? AND i.Status!='Unpaid' ORDER BY i.time_sell DESC LIMIT 30");
     $stmt->execute([$u['id']]);
@@ -121,6 +126,7 @@ function vpnappServices(PDO $db, $u) {
     $services=[];
     foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
         $record=['username'=>$invoice['username'],'panel'=>$invoice['Service_location'],
+                 'panel_name'=>$invoice['panel_name']?:$invoice['Service_location'],
                  'plan_name'=>$invoice['name_product'],'panel_code'=>$invoice['panel_code'],
                  'provider_type'=>$invoice['provider_type'],'quota_gb'=>(float)$invoice['Volume'],
                  'days'=>(int)$invoice['Service_time'],'status'=>$invoice['Status'],
