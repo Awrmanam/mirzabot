@@ -580,6 +580,9 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     // parallel mobile requests cannot flood Telegram with the same receipt.
     $stored['receipt_last_attempt_at']=time();
     $stored['receipt_send_attempts']=$sendAttempts+1;
+    // A previous group notification is not proof of a private admin photo;
+    // reset the confirmation before each intentional retry.
+    $stored['receipt_notice_sent']=false;
     $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
         WHERE external_id=? AND owner_id=?")->execute([
         json_encode($stored,JSON_UNESCAPED_UNICODE),time(),$key,$u['id']]);
