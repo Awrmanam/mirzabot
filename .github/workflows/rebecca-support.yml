@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - rebecca-support
+      - feature/vpn-app-pairing-20261029
 
 permissions:
   contents: read
@@ -45,6 +46,8 @@ jobs:
           php -l function.php
           php -l index.php
           php -l app_pairing.php
+          php -l api/vpnapp.php
+          php -l tests/vpnapp_store_static.php
           php -l tests/app_pairing_static.php
           php -l table.php
           php -l emoji_install.php
@@ -69,6 +72,8 @@ jobs:
 
       - name: Validate app pairing contract
         run: php tests/app_pairing_static.php
+      - name: Validate standalone VPN store bridge
+        run: php tests/vpnapp_store_static.php
 
       - name: Validate installer syntax
         run: bash -n install.sh
