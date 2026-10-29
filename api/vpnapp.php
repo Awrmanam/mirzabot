@@ -111,14 +111,17 @@ function vpnappInvoices(PDO $db, $u) {
     return $items;
 }
 function vpnappServices(PDO $db, $u) {
-    $stmt=$db->prepare("SELECT username,Service_location,name_product,Volume,Service_time,Status
-        FROM invoice WHERE id_user=? AND Status!='Unpaid' ORDER BY time_sell DESC LIMIT 30");
+    $stmt=$db->prepare("SELECT i.username,i.Service_location,i.name_product,i.Volume,i.Service_time,i.Status,
+        p.code_panel AS panel_code,p.type AS provider_type
+        FROM invoice i LEFT JOIN marzban_panel p ON p.name_panel=i.Service_location
+        WHERE i.id_user=? AND i.Status!='Unpaid' ORDER BY i.time_sell DESC LIMIT 30");
     $stmt->execute([$u['id']]);
     $manage=new ManagePanel();
     $services=[];
     foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
         $record=['username'=>$invoice['username'],'panel'=>$invoice['Service_location'],
-                 'plan_name'=>$invoice['name_product'],'quota_gb'=>(float)$invoice['Volume'],
+                 'plan_name'=>$invoice['name_product'],'panel_code'=>$invoice['panel_code'],
+                 'provider_type'=>$invoice['provider_type'],'quota_gb'=>(float)$invoice['Volume'],
                  'days'=>(int)$invoice['Service_time'],'status'=>$invoice['Status'],
                  'used_bytes'=>null,'expire'=>null,'subscription_url'=>null,
                  'protocol'=>'unknown'];
