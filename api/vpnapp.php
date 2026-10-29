@@ -327,38 +327,82 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     return ['status'=>'waiting'];
 }
 function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
-    // Call Mirza's actual Telegram Mini App *backend* purchase routine, keeping
-    // its own code and all user reporting untouched. Server-only user token.
-    $url=(string)getenv('MIRZA_VPNAPP_MINIAPP_URL');
-    $parsed=parse_url($url);
-    if (!$parsed || ($parsed['scheme']??'')!=='https' ||
-        !is_string($parsed['host']??null) ||
-        ($parsed['path']??'')!=='/api/miniapp.php' ||
-        isset($parsed['user']) || isset($parsed['pass']) ||
-        isset($parsed['query']) || isset($parsed['fragment']))
-        vpnappError(503,'Checkout adapter is not configured');
-    $payload=['actions'=>'purchase','user_id'=>(int)$u['id'],
-        'country_id'=>$panel['code_panel'],'service_id'=>$plan['code_product'],
-        'custom_service'=>null,'custom_username'=>'','custom_note'=>''];
-    $ch=curl_init($url);
-    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>json_encode($payload),
-        CURLOPT_HTTPHEADER=>['Content-Type: application/json',
-             'Authorization: Bearer '.$u['token']],
-        CURLOPT_RETURNTRANSFER=>true,CURLOPT_FOLLOWLOCATION=>false,
-        CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,
-        CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>35]);
-    $raw=curl_exec($ch);$status=curl_getinfo($ch,CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    $result=is_string($raw)?json_decode($raw,true):null;
-    if ($status===200 && is_array($result) && ($result['success']??false)===true) {
-        vpnappUpdate($db,$key,'fulfilled',['invoice_id'=>$result['order_id'],
-            'result'=>['id'=>$key,'status'=>'fulfilled','invoice_id'=>$result['order_id']]]);
-        return ['id'=>$key,'status'=>'fulfilled','invoice_id'=>$result['order_id']];
+    // Mirza's own panel manager and invoice records are authoritative.
+    // A fresh app user must NOT depend on ever logging into Telegram Mini App
+    // to obtain a legacy miniapp bearer token.
+    $amount=(int)round((int)$plan['price_product']*(100-(int)$u['pricediscount'])/100);
+    if ($amount<=0 || $amount>1000000) vpnappError(400,'Unsupported wallet plan price');
+    if (!empty($plan['one_buy_status'])) {
+        $stmt=$db->prepare("SELECT COUNT(*) FROM invoice WHERE id_user=? AND Status!='Unpaid'");
+        $stmt->execute([$u['id']]);
+        if ((int)$stmt->fetchColumn()>0) vpnappError(409,'One-time plan unavailable');
     }
-    // A timeout could mean the Mini App bought the service. Never retry this
-    // key automatically or charge twice. Requires operator reconciliation.
-    vpnappUpdate($db,$key,'unknown');
-    return ['id'=>$key,'status'=>'unknown','needs_review'=>true];
+    $id=bin2hex(random_bytes(4));
+    $suffix=bin2hex(random_bytes(7));
+    $username=generateUsername($u['id'],$panel['MethodUsername'],$u['username'],
+        $suffix, 'vpn_'.$suffix,$panel['namecustom'],$u['namecustom']);
+    if (!is_string($username) || strlen($username)<3 ||
+        !preg_match('/^[A-Za-z0-9_.-]{3,128}$/D',$username))
+        $username='vpn_'.$suffix;
+    $stmt=$db->prepare("SELECT COUNT(*) FROM invoice WHERE username=?");
+    $stmt->execute([$username]);
+    if ((int)$stmt->fetchColumn()>0) vpnappError(409,'Generated username already exists');
+    $invoice=$db->prepare("INSERT INTO invoice(id_user,id_invoice,username,time_sell,Service_location,
+        name_product,price_product,Volume,Service_time,Status,note,refral,notifctions)
+        VALUES(?,?,?,?,?,?,?,?,?,'Unpaid','',?,?)");
+    $invoice->execute([$u['id'],$id,$username,time(),$panel['name_panel'],
+        $plan['name_product'],$amount,$plan['Volume_constraint'],
+        $plan['Service_time'],$u['affiliates'],'{"volume":false,"time":false}']);
+    $reserve=$db->prepare("UPDATE user SET Balance=Balance-? WHERE id=? AND Balance>=?
+                           AND User_Status!='block'");
+    $reserve->execute([$amount,$u['id'],$amount]);
+    if ($reserve->rowCount()!==1) {
+        vpnappUpdate($db,$key,'failed',['invoice_id'=>$id,
+            'result'=>['id'=>$key,'status'=>'failed','reason'=>'insufficient_wallet']]);
+        return ['id'=>$key,'status'=>'failed','reason'=>'insufficient_wallet'];
+    }
+    $manage=new ManagePanel();
+    try {
+        $days=(int)$plan['Service_time'];
+        $expires=$days>0?strtotime('+'.$days.' days'):0;
+        $limit=(float)$plan['Volume_constraint']*1073741824;
+        $output=$manage->createUser($panel['name_panel'],$plan['code_product'],
+            $username,['expire'=>$expires,'data_limit'=>$limit,
+                       'from_id'=>$u['id'],'username'=>$u['username'],'type'=>'buy']);
+    } catch (Throwable $e) {
+        // Panel may have created the user before a timeout. Never blind-retry.
+        vpnappUpdate($db,$key,'unknown',['invoice_id'=>$id,
+            'result'=>['id'=>$key,'status'=>'unknown','needs_review'=>true]]);
+        return ['id'=>$key,'status'=>'unknown','needs_review'=>true];
+    }
+    if (!is_array($output) || empty($output['username'])) {
+        $db->prepare("UPDATE user SET Balance=Balance+? WHERE id=?")
+            ->execute([$amount,$u['id']]);
+        vpnappUpdate($db,$key,'failed',['invoice_id'=>$id,
+            'result'=>['id'=>$key,'status'=>'failed','reason'=>'panel_failed']]);
+        return ['id'=>$key,'status'=>'failed','reason'=>'panel_failed'];
+    }
+    $db->prepare("UPDATE invoice SET Status='active' WHERE id_user=? AND id_invoice=?")
+        ->execute([$u['id'],$id]);
+    // Mirror Mirza's counters for sequential username schemes.
+    if (in_array($panel['MethodUsername'],[
+        'نام کاربری + عدد به ترتیب','آیدی عددی+عدد ترتیبی',
+        'متن دلخواه نماینده + عدد ترتیبی','متن دلخواه + عدد ترتیبی'],true)) {
+        $db->prepare("UPDATE user SET number_username=number_username+1 WHERE id=?")
+            ->execute([$u['id']]);
+    }
+    if ($panel['MethodUsername']==='متن دلخواه + عدد ترتیبی') {
+        $db->exec("UPDATE setting SET numbercount=numbercount+1");
+    }
+    $result=['id'=>$key,'status'=>'fulfilled','invoice_id'=>$id,
+             'service'=>$username,'amount_toman'=>$amount];
+    vpnappUpdate($db,$key,'fulfilled',['invoice_id'=>$id,'result'=>$result]);
+    vpnappNotify('✅ خرید با کیف پول از اپ VPN'. "\n".
+        'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
+        'پلن: '.htmlspecialchars($plan['name_product'],ENT_QUOTES,'UTF-8'). "\n".
+        'سرویس: '.htmlspecialchars($username,ENT_QUOTES,'UTF-8'). "\n".
+        'مبلغ: '.number_format($amount).' تومان', $u['id']);
+    return $result;
 }
 
 if (getenv('MIRZA_VPNAPP_BRIDGE_ENABLED')!=='1')
