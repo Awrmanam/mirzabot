@@ -333,9 +333,12 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
 function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null) {
     global $pdo, $APIKEY;
     $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!($setting['Channel_Report']??'') || !$APIKEY) {
+        error_log('[vpnapp] Telegram report group or bot token is not configured');
+        return false;
+    }
     $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
     $topic->execute();$thread=$topic->fetchColumn();
-    if (!($setting['Channel_Report']??'')) return;
     $fields=['chat_id'=>$setting['Channel_Report'],'caption'=>$text,'text'=>$text,
              'parse_mode'=>'HTML'];
     if ($thread) $fields['message_thread_id']=$thread;
@@ -357,10 +360,35 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
     } else {
         unset($fields['caption']);$method='sendMessage';
     }
-    $ch=curl_init('https://api.telegram.org/bot'.$APIKEY.'/'.$method);
-    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$fields,
-        CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>3,CURLOPT_TIMEOUT=>8]);
-    curl_exec($ch);curl_close($ch);
+    // Only retry without the thread when Telegram explicitly rejects the
+    // topic. Do not re-send on timeouts (an unknown first send may succeed).
+    for ($attempt=0;$attempt<2;$attempt++) {
+        $ch=curl_init('https://api.telegram.org/bot'.$APIKEY.'/'.$method);
+        curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$fields,
+            CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>4,CURLOPT_TIMEOUT=>12]);
+        $body=curl_exec($ch);
+        $errno=curl_errno($ch);
+        $http=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($errno || $body===false) {
+            error_log('[vpnapp] Telegram '.$method.' connection failed (curl '.$errno.')');
+            return false;
+        }
+        $decoded=json_decode($body,true);
+        if ($http===200 && is_array($decoded) && ($decoded['ok']??false)===true) return true;
+        $description=is_array($decoded)?(string)($decoded['description']??''):'';
+        if ($attempt===0 && isset($fields['message_thread_id']) &&
+            $http===400 && (
+                stripos($description,'thread')!==false ||
+                stripos($description,'topic')!==false)) {
+            unset($fields['message_thread_id']);
+            continue;
+        }
+        error_log('[vpnapp] Telegram '.$method.' rejected (HTTP '.$http.'): '.
+            substr($description,0,160));
+        return false;
+    }
+    return false;
 }
 function vpnappExisting(PDO $db, $u, $key) {
     $stmt=$db->prepare("SELECT * FROM vpnapp_orders WHERE external_id=? AND owner_id=?");
