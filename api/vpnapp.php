@@ -48,6 +48,14 @@ function vpnappSigned($raw, $headers, $secret, PDO $db) {
     } catch (PDOException $e) { return false; }
     return true;
 }
+/** Restrict VPN app writes to designated Telegram IDs during checkout QA. */
+function vpnappCheckoutAllowed($u) {
+    if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1') return false;
+    $list=trim((string)(getenv('MIRZA_VPNAPP_TEST_USER_IDS')?:''));
+    if ($list==='') return true; // Explicitly empty means global release.
+    $allowed=array_map('trim',explode(',',$list));
+    return in_array((string)$u['id'],$allowed,true);
+}
 function vpnappUser(PDO $db, $id) {
     if (!is_string($id) || !preg_match('/^[1-9][0-9]{0,19}$/D',$id)) vpnappError(400,'Invalid account');
     $stmt=$db->prepare("SELECT id,username,agent,Balance,User_Status,pricediscount,namecustom,
@@ -523,19 +531,19 @@ try {
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
     if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
     if ($action==='capabilities') vpnappReply(200, ['ok'=>true,
-        'checkout_enabled'=>getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')==='1']);
+        'checkout_enabled'=>vpnappCheckoutAllowed($u)]);
     if ($action==='services_index') vpnappReply(200,['ok'=>true,'items'=>vpnappServicesIndex($pdo,$u)]);
     if ($action==='services') vpnappReply(200,['ok'=>true,'items'=>vpnappServices($pdo,$u)]);
     if ($action==='order_status') vpnappReply(200,['ok'=>true,
         'order'=>vpnappReceiptInfo($pdo,$u,(string)($input['order_id']??''))]);
     if ($action==='receipt') {
-        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+        if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         vpnappReply(200,['ok'=>true,'receipt'=>vpnappSubmitReceipt($pdo,$u,
             (string)($input['order_id']??''),$input['image_base64']??'')]);
     }
     if ($action==='renew_card') {
-        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+        if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         $key=(string)($input['order_id']??'');
         $previous=vpnappExisting($pdo,$u,$key);
@@ -549,7 +557,7 @@ try {
             $input['username']??null,$input['panel_code']??null,$input['plan_code']??null)]);
     }
     if ($action==='renew_wallet') {
-        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+        if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         $key=(string)($input['order_id']??'');
         $previous=vpnappExisting($pdo,$u,$key);
@@ -562,7 +570,7 @@ try {
         vpnappReply(200,['ok'=>true,'order'=>$result]);
     }
     if ($action==='checkout') {
-        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+        if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         $key=(string)($input['order_id']??'');
         $previous=vpnappExisting($pdo,$u,$key);
