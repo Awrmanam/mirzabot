@@ -317,7 +317,8 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
             $result['amount_toman']=(int)$result['invoice_amount'];
         }
     }
-    unset($result['invoice_amount'],$result['service_username']);
+    $result['id']=$result['external_id'];
+    unset($result['external_id'],$result['invoice_amount'],$result['service_username']);
     return $result;
 }
 function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null) {
