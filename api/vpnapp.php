@@ -442,7 +442,12 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
     } catch (Throwable $e) {
         error_log('[vpnapp] Telegram admin notification could not read destinations');
     }
-    return $reportSent || $adminSent;
+    // A receipt is counted as delivered to the owner only if an authorized
+    // administrator's private Telegram actually accepted the photo. Sending
+    // into a group is useful but does not prove a private admin alert.
+    if ($photo!==null && !$adminSent)
+        error_log('[vpnapp] Receipt photo was NOT delivered to a private bot admin');
+    return $photo!==null ? $adminSent : ($reportSent || $adminSent);
 }
 function vpnappExisting(PDO $db, $u, $key) {
     $stmt=$db->prepare("SELECT * FROM vpnapp_orders WHERE external_id=? AND owner_id=?");
@@ -544,9 +549,18 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     if (!$order) {$db->rollBack();vpnappError(404,'Order not found');}
     $stored=json_decode($order['result_json']??'null',true);
     if (!is_array($stored)) $stored=[];
-    if ($order['status']==='waiting' && !empty($stored['receipt_notice_sent'])) {
-        $db->commit();
-        return ['status'=>'waiting','notification_delivered'=>true];
+    // A past group success is not proof that the bot owner saw the photo.
+    // Explicit re-upload of this same order may retry private delivery, but
+    // it must never create a second payment or repeat too rapidly.
+    $lastAttempt=(int)($stored['receipt_last_attempt_at']??0);
+    $sendAttempts=(int)($stored['receipt_send_attempts']??0);
+    if ($lastAttempt>time()-30) {
+        $db->rollBack();
+        vpnappError(429,'Wait 30 seconds before retrying this receipt');
+    }
+    if ($sendAttempts>=8) {
+        $db->rollBack();
+        vpnappError(429,'Receipt delivery retry limit reached; contact support');
     }
     if (!in_array($order['status'],['awaiting_receipt','waiting'],true)) {
         $db->rollBack();vpnappError(409,'Order is not awaiting receipt');
@@ -562,6 +576,13 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
         $db->prepare("UPDATE vpnapp_orders SET status='waiting',updated_at=?
             WHERE external_id=? AND owner_id=?")->execute([time(),$key,$u['id']]);
     }
+    // Reserve a retry attempt before leaving the locked transaction;
+    // parallel mobile requests cannot flood Telegram with the same receipt.
+    $stored['receipt_last_attempt_at']=time();
+    $stored['receipt_send_attempts']=$sendAttempts+1;
+    $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
+        WHERE external_id=? AND owner_id=?")->execute([
+        json_encode($stored,JSON_UNESCAPED_UNICODE),time(),$key,$u['id']]);
     $db->commit();
 
     $sent=false;
