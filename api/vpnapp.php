@@ -89,6 +89,7 @@ function vpnappCatalog(PDO $db, $u) {
             $discount=(int)$u['pricediscount'];
             $amount=max(0, (int)round($base*(100-$discount)/100));
             $catalog[]=['panel_code'=>$panel['code_panel'],'provider_type'=>$panel['type'],
+                'panel_name'=>$panel['name_panel'],
                 'plan_code'=>$p['code_product'],'title'=>$p['name_product'],
                 'price_toman'=>$amount,'volume_gb'=>(float)$p['Volume_constraint'],
                 'days'=>(int)$p['Service_time'],'description'=>$p['note']];
