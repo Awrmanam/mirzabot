@@ -1,0 +1,331 @@
+<?php
+/**
+ * Dedicated signed server-to-server connector for the standalone VPN client.
+ * Independent of the Telegram Mini App: never edits app/ or api/miniapp.php.
+ * Disabled unless MIRZA_VPNAPP_BRIDGE_ENABLED=1.
+ *
+ * JSON only. Never expose Mirza's API key, panel credentials or user bearer
+ * token to the mobile client. Iran API must verify device ownership first.
+ */
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../function.php';
+require_once __DIR__ . '/../panels.php';
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+
+function vpnappReply($code, $data) {
+    http_response_code($code);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+function vpnappError($code, $text) { vpnappReply($code, ['ok'=>false, 'error'=>$text]); }
+function vpnappSetup(PDO $db) {
+    $db->exec("CREATE TABLE IF NOT EXISTS vpnapp_rpc_nonces (
+        nonce CHAR(32) PRIMARY KEY, created_at BIGINT NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $db->exec("CREATE TABLE IF NOT EXISTS vpnapp_orders (
+        external_id VARCHAR(64) PRIMARY KEY,
+        owner_id BIGINT NOT NULL, kind VARCHAR(16) NOT NULL,
+        status VARCHAR(24) NOT NULL, payment_id VARCHAR(32) NULL,
+        invoice_id VARCHAR(32) NULL, result_json TEXT NULL,
+        created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
+        INDEX idx_owner (owner_id,created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+function vpnappSigned($raw, $headers, $secret, PDO $db) {
+    $ts = (string)($headers['X-Mirza-Timestamp'] ?? '');
+    $nonce = strtolower((string)($headers['X-Mirza-Nonce'] ?? ''));
+    $sig = strtolower((string)($headers['X-Mirza-Signature'] ?? ''));
+    if (!ctype_digit($ts) || strlen($ts)>12 || abs(time()-(int)$ts)>120 ||
+        !preg_match('/^[0-9a-f]{32}$/D', $nonce) ||
+        !preg_match('/^[0-9a-f]{64}$/D', $sig)) return false;
+    $expected = hash_hmac('sha256', $ts."\n".$nonce."\n".$raw, $secret);
+    if (!hash_equals($expected,$sig)) return false;
+    $db->prepare("DELETE FROM vpnapp_rpc_nonces WHERE created_at<?")->execute([time()-300]);
+    try {
+        $db->prepare("INSERT INTO vpnapp_rpc_nonces(nonce,created_at) VALUES(?,?)")
+            ->execute([$nonce,time()]);
+    } catch (PDOException $e) { return false; }
+    return true;
+}
+function vpnappUser(PDO $db, $id) {
+    if (!is_string($id) || !preg_match('/^[1-9][0-9]{0,19}$/D',$id)) vpnappError(400,'Invalid account');
+    $stmt=$db->prepare("SELECT id,username,agent,Balance,token,User_Status,pricediscount,namecustom,
+                        number_username,affiliates FROM user WHERE id=? LIMIT 1");
+    $stmt->execute([$id]); $u=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$u || $u['User_Status']==='block') vpnappError(403,'Account blocked or unknown');
+    return $u;
+}
+function vpnappPanel(PDO $db, $code) {
+    if (!is_string($code) || strlen($code)>64) vpnappError(400,'Invalid panel');
+    $stmt=$db->prepare("SELECT * FROM marzban_panel WHERE code_panel=? AND status!='disable' LIMIT 1");
+    $stmt->execute([$code]);$p=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$p) vpnappError(404,'Panel unavailable');
+    return $p;
+}
+function vpnappProduct(PDO $db, $agent, $panel, $code) {
+    if (!is_string($code) || strlen($code)>128) vpnappError(400,'Invalid plan');
+    $stmt=$db->prepare("SELECT * FROM product WHERE code_product=? AND agent=?
+        AND Location IN (?,?,'/all') LIMIT 1");
+    $stmt->execute([$code,$agent,$panel['code_panel'],$panel['name_panel']]);
+    $p=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$p || in_array($panel['name_panel'], (array)json_decode($p['hide_panel']??'[]',true),true))
+        vpnappError(404,'Plan unavailable');
+    if (!is_numeric($p['price_product']) || $p['price_product']<0)
+        vpnappError(400,'Plan price invalid');
+    return $p;
+}
+function vpnappCatalog(PDO $db, $u) {
+    $panels=$db->query("SELECT code_panel,name_panel,type,status FROM marzban_panel WHERE status!='disable'")->fetchAll(PDO::FETCH_ASSOC);
+    $catalog=[];
+    foreach ($panels as $panel) {
+        $stmt=$db->prepare("SELECT code_product,name_product,price_product,Volume_constraint,Service_time,note,hide_panel
+            FROM product WHERE agent=? AND Location IN (?,?,'/all') LIMIT 150");
+        $stmt->execute([$u['agent'],$panel['code_panel'],$panel['name_panel']]);
+        foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            $hidden=json_decode($p['hide_panel']??'[]',true);
+            if (is_array($hidden)&&in_array($panel['name_panel'],$hidden,true)) continue;
+            $base=(int)$p['price_product'];
+            $discount=(int)$u['pricediscount'];
+            $amount=max(0, (int)round($base*(100-$discount)/100));
+            $catalog[]=['panel_code'=>$panel['code_panel'],'provider_type'=>$panel['type'],
+                'plan_code'=>$p['code_product'],'title'=>$p['name_product'],
+                'price_toman'=>$amount,'volume_gb'=>(float)$p['Volume_constraint'],
+                'days'=>(int)$p['Service_time'],'description'=>$p['note']];
+        }
+    }
+    return $catalog;
+}
+function vpnappInvoices(PDO $db, $u) {
+    $stmt=$db->prepare("SELECT id_invoice,username,Service_location,name_product,Volume,Service_time,
+        Status,time_sell,price_product FROM invoice WHERE id_user=? AND Status!='Unpaid'
+        ORDER BY time_sell DESC LIMIT 100");
+    $stmt->execute([$u['id']]);
+    $items=[];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $inv) {
+        $items[]=['id'=>$inv['id_invoice'],'username'=>$inv['username'],
+            'panel'=>$inv['Service_location'],'plan_name'=>$inv['name_product'],
+            'quota_gb'=>(float)$inv['Volume'],'days'=>(int)$inv['Service_time'],
+            'status'=>$inv['Status'],'created_at'=>(int)$inv['time_sell']];
+    }
+    return $items;
+}
+function vpnappReceiptInfo(PDO $db, $u, $order) {
+    $stmt=$db->prepare("SELECT o.external_id,o.kind,o.status,o.invoice_id,o.payment_id,
+        p.payment_Status AS payment_status,i.Status AS service_status
+        FROM vpnapp_orders o LEFT JOIN Payment_report p ON p.id_order=o.payment_id
+        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id
+        WHERE o.owner_id=? AND o.external_id=? LIMIT 1");
+    $stmt->execute([$u['id'],$order]);$result=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$result) vpnappError(404,'Order not found');
+    return $result;
+}
+function vpnappNotify($text, $buttonId = null, $photo = null) {
+    global $pdo, $APIKEY;
+    $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
+    $topic->execute();$thread=$topic->fetchColumn();
+    if (!($setting['Channel_Report']??'')) return;
+    $fields=['chat_id'=>$setting['Channel_Report'],'caption'=>$text,'text'=>$text,
+             'parse_mode'=>'HTML'];
+    if ($thread) $fields['message_thread_id']=$thread;
+    if ($buttonId) $fields['reply_markup']=json_encode(['inline_keyboard'=>[
+        [['text'=>'مدیریت مشتری','callback_data'=>'manageuser_'.$buttonId]]
+    ]]);
+    if ($photo) {
+        unset($fields['text']);$fields['photo']=new CURLFile($photo);
+        $method='sendPhoto';
+    } else {
+        unset($fields['caption']);$method='sendMessage';
+    }
+    $ch=curl_init('https://api.telegram.org/bot'.$APIKEY.'/'.$method);
+    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$fields,
+        CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>3,CURLOPT_TIMEOUT=>8]);
+    curl_exec($ch);curl_close($ch);
+}
+function vpnappExisting(PDO $db, $u, $key) {
+    $stmt=$db->prepare("SELECT * FROM vpnapp_orders WHERE external_id=? AND owner_id=?");
+    $stmt->execute([$key,$u['id']]);return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+function vpnappNewOrder(PDO $db, $u, $kind, $key) {
+    if (!is_string($key) || !preg_match('/^[0-9a-f-]{36}$/D',$key))
+        vpnappError(400,'Invalid order key');
+    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders WHERE owner_id=? AND status IN ('processing','unknown','awaiting_receipt','waiting') AND created_at>?");
+    $stmt->execute([$u['id'],time()-86400]);
+    if ((int)$stmt->fetchColumn()>0) vpnappError(409,'A previous order is still pending');
+    $stmt=$db->prepare("INSERT INTO vpnapp_orders(external_id,owner_id,kind,status,created_at,updated_at) VALUES(?,?,?,?,?,?)");
+    $stmt->execute([$key,$u['id'],$kind,'processing',time(),time()]);
+}
+function vpnappUpdate(PDO $db, $key, $status, $fields=[]) {
+    $stmt=$db->prepare("UPDATE vpnapp_orders SET status=?,payment_id=?,invoice_id=?,result_json=?,updated_at=? WHERE external_id=?");
+    $stmt->execute([$status,$fields['payment_id']??null,$fields['invoice_id']??null,
+        isset($fields['result'])?json_encode($fields['result'],JSON_UNESCAPED_UNICODE):null,time(),$key]);
+}
+function vpnappCardOrder(PDO $db, $u, $plan, $panel, $key) {
+    $amount=(int)round((int)$plan['price_product']*(100-(int)$u['pricediscount'])/100);
+    $cap=(int)(getenv('MIRZA_VPNAPP_CARD_CAP_TOMAN')?:150000);
+    if ($amount<1000 || $amount>$cap) vpnappError(400,'Amount exceeds app card limit');
+    // Keep the existing mirza card flow/cron: Payment_report -> DirectPayment.
+    $card=$db->query("SELECT cardnumber,namecard FROM card_number ORDER BY RAND() LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!$card || !preg_match('/^[0-9]{16}$/D',(string)$card['cardnumber']))
+        vpnappError(503,'Card not configured');
+    $invoiceId=bin2hex(random_bytes(4));
+    $paymentId=bin2hex(random_bytes(5));
+    // Avoid panel-specific username collisions with random, panel-safe suffix.
+    $name='app_'.substr(hash('sha256',$u['id'].$invoiceId),0,15);
+    $max=(int)$db->query("SELECT COUNT(*) FROM invoice WHERE username=".$db->quote($name))->fetchColumn();
+    if ($max) vpnappError(409,'Duplicate service username');
+    $ins=$db->prepare("INSERT INTO invoice(id_user,id_invoice,username,time_sell,Service_location,name_product,
+        price_product,Volume,Service_time,Status,note,refral,notifctions)
+        VALUES(?,?,?,?,?,?,?,?,?,'Unpaid','',?,?)");
+    $ins->execute([$u['id'],$invoiceId,$name,time(),$panel['name_panel'],$plan['name_product'],
+        $amount,$plan['Volume_constraint'],$plan['Service_time'],$u['affiliates'],
+        '{"volume":false,"time":false}']);
+    $pay=$db->prepare("INSERT INTO Payment_report(id_user,id_order,time,price,payment_Status,Payment_Method,id_invoice)
+        VALUES(?,?,?,?, 'Unpaid','cart to cart',?)");
+    $pay->execute([$u['id'],$paymentId,date('Y/m/d H:i:s'),$amount,'getconfigafterpay|'.$name]);
+    $result=['id'=>$key,'method'=>'card','amount_toman'=>$amount,
+        'card_number'=>$card['cardnumber'],'card_holder'=>$card['namecard'],
+        'payment_id'=>$paymentId,'status'=>'awaiting_receipt'];
+    vpnappUpdate($db,$key,'awaiting_receipt',['payment_id'=>$paymentId,
+        'invoice_id'=>$invoiceId,'result'=>$result]);
+    return $result;
+}
+function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
+    if (!is_string($encoded) || strlen($encoded)>2800000 ||
+        !preg_match('/^[A-Za-z0-9+\/=]+$/D',$encoded))
+        vpnappError(400,'Invalid image data');
+    $data=base64_decode($encoded,true);
+    if ($data===false || strlen($data)<200 || strlen($data)>2000000)
+        vpnappError(400,'Invalid image size');
+    $kind=(new finfo(FILEINFO_MIME_TYPE))->buffer($data);
+    $image=@getimagesizefromstring($data);
+    if (!in_array($kind,['image/png','image/jpeg'],true) || !$image ||
+        $image[0]>5000 || $image[1]>5000)
+        vpnappError(400,'Unsupported image');
+    $stmt=$db->prepare("SELECT payment_id,status FROM vpnapp_orders WHERE owner_id=? AND external_id=? FOR UPDATE");
+    $db->beginTransaction();
+    $stmt->execute([$u['id'],$key]);$order=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {$db->rollBack();vpnappError(404,'Order not found');}
+    if ($order['status']==='waiting') {$db->commit();return ['status'=>'waiting'];}
+    if ($order['status']!=='awaiting_receipt') {
+        $db->rollBack();vpnappError(409,'Receipt already submitted or order closed');
+    }
+    $update=$db->prepare("UPDATE Payment_report SET payment_Status='waiting',at_updated=?,dec_not_confirmed='VPN app receipt'
+        WHERE id_order=? AND id_user=? AND payment_Status='Unpaid'");
+    $update->execute([date('Y/m/d H:i:s'),$order['payment_id'],$u['id']]);
+    if ($update->rowCount()!=1) {$db->rollBack();vpnappError(409,'Payment is not pending');}
+    $db->prepare("UPDATE vpnapp_orders SET status='waiting',updated_at=? WHERE external_id=?")
+        ->execute([time(),$key]);
+    $db->commit();
+    // Notifications must never determine payment status. Send best-effort
+    // receipt preview to the existing Mirza report group, not a third bot.
+    $tmp=tempnam(sys_get_temp_dir(),'vpnreceipt_');
+    if ($tmp!==false) {
+        try {
+            file_put_contents($tmp,$data,LOCK_EX);
+            vpnappNotify('🧾 رسید خرید از اپ VPN'. "\n".
+                'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
+                'پیگیری: '.htmlspecialchars($order['payment_id'],ENT_QUOTES,'UTF-8'). "\n".
+                'وضعیت: منتظر تأیید خودکار میرزا', $u['id'],$tmp);
+        } finally { @unlink($tmp); }
+    }
+    return ['status'=>'waiting'];
+}
+function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
+    // Call Mirza's actual Telegram Mini App *backend* purchase routine, keeping
+    // its own code and all user reporting untouched. Server-only user token.
+    $url=(string)getenv('MIRZA_VPNAPP_MINIAPP_URL');
+    $parsed=parse_url($url);
+    if (!$parsed || ($parsed['scheme']??'')!=='https' ||
+        !is_string($parsed['host']??null) ||
+        ($parsed['path']??'')!=='/api/miniapp.php' ||
+        isset($parsed['user']) || isset($parsed['pass']) ||
+        isset($parsed['query']) || isset($parsed['fragment']))
+        vpnappError(503,'Checkout adapter is not configured');
+    $payload=['actions'=>'purchase','user_id'=>(int)$u['id'],
+        'country_id'=>$panel['code_panel'],'service_id'=>$plan['code_product'],
+        'custom_service'=>null,'custom_username'=>'','custom_note'=>''];
+    $ch=curl_init($url);
+    curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>json_encode($payload),
+        CURLOPT_HTTPHEADER=>['Content-Type: application/json',
+             'Authorization: Bearer '.$u['token']],
+        CURLOPT_RETURNTRANSFER=>true,CURLOPT_FOLLOWLOCATION=>false,
+        CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,
+        CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>35]);
+    $raw=curl_exec($ch);$status=curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $result=is_string($raw)?json_decode($raw,true):null;
+    if ($status===200 && is_array($result) && ($result['success']??false)===true) {
+        vpnappUpdate($db,$key,'fulfilled',['invoice_id'=>$result['order_id'],
+            'result'=>['id'=>$key,'status'=>'fulfilled','invoice_id'=>$result['order_id']]]);
+        return ['id'=>$key,'status'=>'fulfilled','invoice_id'=>$result['order_id']];
+    }
+    // A timeout could mean the Mini App bought the service. Never retry this
+    // key automatically or charge twice. Requires operator reconciliation.
+    vpnappUpdate($db,$key,'unknown');
+    return ['id'=>$key,'status'=>'unknown','needs_review'=>true];
+}
+
+if (getenv('MIRZA_VPNAPP_BRIDGE_ENABLED')!=='1')
+    vpnappError(503,'VPN app integration is disabled');
+$secret=(string)getenv('MIRZA_APP_BRIDGE_SECRET');
+$raw=file_get_contents('php://input');
+if (strlen($secret)<32 || !is_string($raw) || strlen($raw)>2900000)
+    vpnappError(403,'Bridge unavailable');
+try {
+    vpnappSetup($pdo);
+    $headers=getallheaders();
+    $normalized=[];
+    foreach($headers as $key=>$value) $normalized[strtolower($key)]=$value;
+    $signed=['X-Mirza-Timestamp'=>$normalized['x-mirza-timestamp']??'',
+             'X-Mirza-Nonce'=>$normalized['x-mirza-nonce']??'',
+             'X-Mirza-Signature'=>$normalized['x-mirza-signature']??''];
+    if (!vpnappSigned($raw,$signed,$secret,$pdo)) vpnappError(403,'Invalid signature');
+    $input=json_decode($raw,true);
+    if (!is_array($input)) vpnappError(400,'Invalid request');
+    $u=vpnappUser($pdo,(string)($input['telegram_id']??''));
+    $action=$input['action']??'';
+    if ($action==='account') vpnappReply(200,['ok'=>true,'telegram_id'=>(string)$u['id'],
+        'balance_toman'=>(int)$u['Balance'],'username'=>$u['username'],
+        'agent'=>$u['agent'],'blocked'=>false]);
+    if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
+    if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
+    if ($action==='order_status') vpnappReply(200,['ok'=>true,
+        'order'=>vpnappReceiptInfo($pdo,$u,(string)($input['order_id']??''))]);
+    if ($action==='receipt') {
+        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+            vpnappError(403,'Checkout disabled');
+        vpnappReply(200,['ok'=>true,'receipt'=>vpnappSubmitReceipt($pdo,$u,
+            (string)($input['order_id']??''),$input['image_base64']??'')]);
+    }
+    if ($action==='checkout') {
+        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+            vpnappError(403,'Checkout disabled');
+        $key=(string)($input['order_id']??'');
+        $previous=vpnappExisting($pdo,$u,$key);
+        if ($previous) {
+            $result=json_decode($previous['result_json']??'null',true);
+            vpnappReply(200,['ok'=>true,'order'=>$result?:[
+                'id'=>$key,'status'=>$previous['status']]]);
+        }
+        $panel=vpnappPanel($pdo,$input['panel_code']??null);
+        $plan=vpnappProduct($pdo,$u['agent'],$panel,$input['plan_code']??null);
+        $method=$input['method']??'card';
+        if (!in_array($method,['card','wallet'],true))
+            vpnappError(400,'Unknown payment method');
+        // Rejections and idempotency are performed within a dedicated bridge
+        // order table. Other Mini App purchases are NOT modified.
+        vpnappNewOrder($pdo,$u,$method,$key);
+        if ($method==='card') {
+            $result=vpnappCardOrder($pdo,$u,$plan,$panel,$key);
+        } else {
+            $result=vpnappWalletPurchase($pdo,$u,$panel,$plan,$key);
+        }
+        vpnappReply(200,['ok'=>true,'order'=>$result]);
+    }
+    vpnappError(400,'Unknown action');
+} catch (Throwable $e) {
+    error_log('[vpnapp] '.get_class($e).' while processing integration request');
+    vpnappError(500,'Integration error');
+}
