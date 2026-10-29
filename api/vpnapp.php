@@ -318,6 +318,13 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
         if (!isset($result['amount_toman'])) {
             $result['amount_toman']=(int)$result['invoice_amount'];
         }
+        // Restore a valid direct import URL after a mobile timeout/restart.
+        // Unverified links and non-V2Ray protocols are never auto-imported.
+        if (is_array($stored) && isset($stored['subscription_url']) &&
+            is_string($stored['subscription_url']) &&
+            preg_match('/^https:\/\//i',$stored['subscription_url'])) {
+            $result['subscription_url']=$stored['subscription_url'];
+        }
     }
     $result['id']=$result['external_id'];
     unset($result['external_id'],$result['invoice_amount'],$result['service_username']);
