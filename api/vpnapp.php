@@ -214,7 +214,7 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
     }
     return $result;
 }
-function vpnappNotify($text, $buttonId = null, $photo = null) {
+function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null) {
     global $pdo, $APIKEY;
     $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
@@ -223,9 +223,18 @@ function vpnappNotify($text, $buttonId = null, $photo = null) {
     $fields=['chat_id'=>$setting['Channel_Report'],'caption'=>$text,'text'=>$text,
              'parse_mode'=>'HTML'];
     if ($thread) $fields['message_thread_id']=$thread;
-    if ($buttonId) $fields['reply_markup']=json_encode(['inline_keyboard'=>[
-        [['text'=>'مدیریت مشتری','callback_data'=>'manageuser_'.$buttonId]]
-    ]]);
+    if ($buttonId) {
+        $buttons=[];
+        if ($paymentId && preg_match('/^[0-9a-f]{10}$/D',(string)$paymentId)) {
+            $buttons[]=[
+                ['text'=>'✅ تأیید رسید','callback_data'=>'Confirm_pay_'.$paymentId],
+                ['text'=>'❌ رد رسید','callback_data'=>'reject_pay_'.$paymentId]
+            ];
+        }
+        $buttons[]=[['text'=>'مدیریت مشتری','callback_data'=>'manageuser_'.$buttonId],
+                    ['text'=>'مسدودسازی','callback_data'=>'blockuserfake_'.$buttonId]];
+        $fields['reply_markup']=json_encode(['inline_keyboard'=>$buttons]);
+    }
     if ($photo) {
         unset($fields['text']);$fields['photo']=new CURLFile($photo);
         $method='sendPhoto';
