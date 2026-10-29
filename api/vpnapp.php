@@ -200,6 +200,15 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
         WHERE o.owner_id=? AND o.external_id=? LIMIT 1");
     $stmt->execute([$u['id'],$order]);$result=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$result) vpnappError(404,'Order not found');
+    if ($result['kind']==='card' &&
+        $result['payment_status']==='paid' && $result['service_status']==='active') {
+        $result['status']='fulfilled';
+    } elseif ($result['payment_status']==='reject' ||
+              $result['payment_status']==='expire') {
+        $result['status']='rejected';
+    } elseif ($result['kind']==='card' && $result['payment_status']==='waiting') {
+        $result['status']='waiting';
+    }
     return $result;
 }
 function vpnappNotify($text, $buttonId = null, $photo = null) {
