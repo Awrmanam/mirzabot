@@ -522,6 +522,8 @@ try {
         'agent'=>$u['agent'],'blocked'=>false]);
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
     if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
+    if ($action==='capabilities') vpnappReply(200, ['ok'=>true,
+        'checkout_enabled'=>getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')==='1']);
     if ($action==='services_index') vpnappReply(200,['ok'=>true,'items'=>vpnappServicesIndex($pdo,$u)]);
     if ($action==='services') vpnappReply(200,['ok'=>true,'items'=>vpnappServices($pdo,$u)]);
     if ($action==='order_status') vpnappReply(200,['ok'=>true,
