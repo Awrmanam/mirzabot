@@ -1,0 +1,17 @@
+name: VPN app pending checkout safety
+on:
+  push:
+    branches: [fix/vpnapp-multiple-pending-receipts-20261030]
+    paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/tests/**', '.github/workflows/vpnapp-checkout-safety.yml']
+  pull_request:
+    branches: [feature/vpn-app-store-bridge-20261029]
+    paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/tests/**']
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax
+        run: php -l api/vpnapp.php
+      - name: Test surgical patcher preserving custom code
+        run: python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_pending_orders.py' -v
