@@ -294,6 +294,9 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
             if (isset($public[$field])) $result[$field]=$public[$field];
         }
     }
+    if (in_array($result['kind'],['card','renewal_card'],true)) {
+        $result['notification_delivered']=!empty($stored['receipt_notice_sent']);
+    }
     unset($result['result_json']);
     // Only the original invoice's *active* status confirms provisioning.
     // An unknown panel outcome with an Unpaid invoice needs reconciliation;
@@ -488,34 +491,64 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     if (!in_array($kind,['image/png','image/jpeg'],true) || !$image ||
         $image[0]>5000 || $image[1]>5000)
         vpnappError(400,'Unsupported image');
-    $stmt=$db->prepare("SELECT payment_id,status FROM vpnapp_orders WHERE owner_id=? AND external_id=? FOR UPDATE");
+    // Duplicate image upload is allowed only to retry a failed Telegram
+    // notification for the same order. It never changes payment state again.
     $db->beginTransaction();
+    $stmt=$db->prepare("SELECT payment_id,status,result_json FROM vpnapp_orders
+        WHERE owner_id=? AND external_id=? FOR UPDATE");
     $stmt->execute([$u['id'],$key]);$order=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {$db->rollBack();vpnappError(404,'Order not found');}
-    if ($order['status']==='waiting') {$db->commit();return ['status'=>'waiting'];}
-    if ($order['status']!=='awaiting_receipt') {
-        $db->rollBack();vpnappError(409,'Receipt already submitted or order closed');
+    $stored=json_decode($order['result_json']??'null',true);
+    if (!is_array($stored)) $stored=[];
+    if ($order['status']==='waiting' && !empty($stored['receipt_notice_sent'])) {
+        $db->commit();
+        return ['status'=>'waiting','notification_delivered'=>true];
     }
-    $update=$db->prepare("UPDATE Payment_report SET payment_Status='waiting',at_updated=?,dec_not_confirmed='VPN app receipt'
-        WHERE id_order=? AND id_user=? AND payment_Status='Unpaid'");
-    $update->execute([date('Y/m/d H:i:s'),$order['payment_id'],$u['id']]);
-    if ($update->rowCount()!=1) {$db->rollBack();vpnappError(409,'Payment is not pending');}
-    $db->prepare("UPDATE vpnapp_orders SET status='waiting',updated_at=? WHERE external_id=?")
-        ->execute([time(),$key]);
+    if (!in_array($order['status'],['awaiting_receipt','waiting'],true)) {
+        $db->rollBack();vpnappError(409,'Order is not awaiting receipt');
+    }
+    if ($order['status']==='awaiting_receipt') {
+        $update=$db->prepare("UPDATE Payment_report
+            SET payment_Status='waiting',at_updated=?,dec_not_confirmed='VPN app receipt'
+            WHERE id_order=? AND id_user=? AND payment_Status='Unpaid'");
+        $update->execute([date('Y/m/d H:i:s'),$order['payment_id'],$u['id']]);
+        if ($update->rowCount()!=1) {
+            $db->rollBack();vpnappError(409,'Payment is not pending');
+        }
+        $db->prepare("UPDATE vpnapp_orders SET status='waiting',updated_at=?
+            WHERE external_id=? AND owner_id=?")->execute([time(),$key,$u['id']]);
+    }
     $db->commit();
-    // Notifications must never determine payment status. Send best-effort
-    // receipt preview to the existing Mirza report group, not a third bot.
+
+    $sent=false;
     $tmp=tempnam(sys_get_temp_dir(),'vpnreceipt_');
     if ($tmp!==false) {
         try {
-            file_put_contents($tmp,$data,LOCK_EX);
-            vpnappNotify('🧾 رسید خرید از اپ VPN'. "\n".
-                'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
-                'پیگیری: '.htmlspecialchars($order['payment_id'],ENT_QUOTES,'UTF-8'). "\n".
-                'وضعیت: منتظر تأیید خودکار میرزا', $u['id'],$tmp,$order['payment_id']);
+            if (file_put_contents($tmp,$data,LOCK_EX)!==false) {
+                @chmod($tmp,0600);
+                $sent=vpnappNotify('🧾 رسید کارت‌به‌کارت از اپ VPN'. "\n".
+                    'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
+                    'پیگیری: '.htmlspecialchars($order['payment_id'],ENT_QUOTES,'UTF-8'). "\n".
+                    'وضعیت: منتظر پردازش میرزا', $u['id'],$tmp,$order['payment_id']);
+            }
         } finally { @unlink($tmp); }
     }
-    return ['status'=>'waiting'];
+    if ($sent) {
+        $db->beginTransaction();
+        $query=$db->prepare("SELECT result_json FROM vpnapp_orders
+            WHERE owner_id=? AND external_id=? FOR UPDATE");
+        $query->execute([$u['id'],$key]);
+        $latest=json_decode((string)$query->fetchColumn(),true);
+        if (!is_array($latest)) $latest=[];
+        $latest['receipt_notice_sent']=true;
+        $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
+            WHERE owner_id=? AND external_id=?")->execute([
+            json_encode($latest,JSON_UNESCAPED_UNICODE),time(),$u['id'],$key]);
+        $db->commit();
+    } else {
+        error_log('[vpnapp] Receipt saved but Telegram report delivery unconfirmed');
+    }
+    return ['status'=>'waiting','notification_delivered'=>$sent];
 }
 function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
     // Mirza's own panel manager and invoice records are authoritative.
