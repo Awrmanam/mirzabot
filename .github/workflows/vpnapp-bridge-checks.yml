@@ -1,0 +1,22 @@
+name: VPN app payment bridge checks
+
+on:
+  pull_request:
+    branches: [feature/vpn-app-store-bridge-20261029]
+    paths:
+      - 'api/vpnapp.php'
+      - 'tests/vpnapp_store_static.php'
+      - '.github/workflows/vpnapp-bridge-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check PHP syntax
+        run: php -l api/vpnapp.php
+      - name: Check app bridge invariants
+        run: php tests/vpnapp_store_static.php
