@@ -349,8 +349,8 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
     $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $chatId=trim((string)($setting['Channel_Report']??''));
     $botToken=trim((string)($APIKEY??''));
-    if ($chatId==='' || $botToken==='') {
-        error_log('[vpnapp] Telegram notice skipped: missing report group or bot token');
+    if ($botToken==='') {
+        error_log('[vpnapp] Telegram notice skipped: missing bot token');
         return false;
     }
     $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
@@ -367,9 +367,9 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
                     ['text'=>'مسدودسازی','callback_data'=>'blockuserfake_'.$buttonId]];
     }
 
-    $send=function($withThread, $attachment) use
-        ($chatId,$botToken,$thread,$buttons,$text,$photo) {
-        $fields=['chat_id'=>$chatId,'parse_mode'=>'HTML'];
+    $send=function($destination, $withThread, $attachment) use
+        ($botToken,$thread,$buttons,$text,$photo) {
+        $fields=['chat_id'=>$destination,'parse_mode'=>'HTML'];
         if ($withThread && $thread) $fields['message_thread_id']=$thread;
         if ($buttons) $fields['reply_markup']=json_encode(
             ['inline_keyboard'=>$buttons],JSON_UNESCAPED_UNICODE);
@@ -401,21 +401,48 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         return [$ok,$status,substr($error,0,220)];
     };
 
-    [$ok,$http,$error]=$send(true,$photo!==null);
-    if ($ok) return true;
-    error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
-    // A forum topic can be deleted or inaccessible while the group still
-    // works; retry to the configured group's general chat in that case.
-    if ($thread && $http===400 &&
-        (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
-        [$ok,$http,$error]=$send(false,$photo!==null);
-        if ($ok) {
-            error_log('[vpnapp] Telegram report sent to group without invalid topic');
-            return true;
+    // Keep Mirza's payment group as the original moderation destination.
+    // Send a private admin copy for *receipt photos* as well, since the
+    // operator may not monitor that group. Non-receipt notices use private
+    // admins only if the report group fails.
+    $reportSent=false;
+    if ($chatId!=='') {
+        [$ok,$http,$error]=$send($chatId,true,$photo!==null);
+        $reportSent=$ok;
+        if (!$ok) {
+            error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
+            if ($thread && $http===400 &&
+                (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
+                [$ok,$http,$error]=$send($chatId,false,$photo!==null);
+                $reportSent=$ok;
+                if (!$ok) error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+            }
         }
-        error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+    } else {
+        error_log('[vpnapp] Payment report group not configured; trying admin private chats');
     }
-    return false;
+    if ($reportSent && $photo===null) return true;
+
+    // Authorized bot administrators only. Receipt alert copies make sure
+    // the shop owner sees a review request even if a report topic is muted.
+    // Telegram requires these admins to have started a private bot chat.
+    $adminSent=false;
+    try {
+        $admins=$pdo->query("SELECT id_admin FROM admin LIMIT 10")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($admins as $adminId) {
+            $adminId=trim((string)$adminId);
+            if (!preg_match('/^[1-9][0-9]{0,19}$/D',$adminId)) continue;
+            [$ok,$http,$error]=$send($adminId,false,$photo!==null);
+            if ($ok) {
+                $adminSent=true;
+            } else {
+                error_log('[vpnapp] Admin receipt notice failed: HTTP '.$http.'; '.$error);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[vpnapp] Telegram admin notification could not read destinations');
+    }
+    return $reportSent || $adminSent;
 }
 function vpnappExisting(PDO $db, $u, $key) {
     $stmt=$db->prepare("SELECT * FROM vpnapp_orders WHERE external_id=? AND owner_id=?");
