@@ -110,6 +110,88 @@ function vpnappInvoices(PDO $db, $u) {
     }
     return $items;
 }
+function vpnappServices(PDO $db, $u) {
+    $stmt=$db->prepare("SELECT username,Service_location,name_product,Volume,Service_time,Status
+        FROM invoice WHERE id_user=? AND Status!='Unpaid' ORDER BY time_sell DESC LIMIT 30");
+    $stmt->execute([$u['id']]);
+    $manage=new ManagePanel();
+    $services=[];
+    foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
+        $record=['username'=>$invoice['username'],'panel'=>$invoice['Service_location'],
+                 'plan_name'=>$invoice['name_product'],'quota_gb'=>(float)$invoice['Volume'],
+                 'days'=>(int)$invoice['Service_time'],'status'=>$invoice['Status'],
+                 'used_bytes'=>null,'expire'=>null,'subscription_url'=>null,
+                 'protocol'=>'unknown'];
+        try {
+            $live=$manage->DataUser($invoice['Service_location'],$invoice['username']);
+            if (is_array($live) && ($live['status']??'')!=='Unsuccessful') {
+                $record['used_bytes']=is_numeric($live['used_traffic']??null)?
+                    (int)$live['used_traffic']:null;
+                $record['expire']=is_numeric($live['expire']??null)?
+                    (int)$live['expire']:null;
+                $url=$live['subscription_url']??$live['key_subscription_url']??null;
+                if (is_string($url) && strlen($url)<2048 && filter_var($url,FILTER_VALIDATE_URL) &&
+                    parse_url($url,PHP_URL_SCHEME)==='https')
+                    $record['subscription_url']=$url;
+                $record['protocol']=$live['type']??'unknown';
+                $record['status']=$live['status']??$invoice['Status'];
+            }
+        } catch (Throwable $e) {
+            // Metadata still visible when a panel cannot be reached.
+        }
+        $services[]=$record;
+    }
+    return $services;
+}
+function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode) {
+    if (!is_string($username) || strlen($username)>128 || $username==='') vpnappError(400,'Invalid service');
+    $stmt=$db->prepare("SELECT * FROM invoice WHERE id_user=? AND username=? AND Status!='Unpaid' LIMIT 1");
+    $stmt->execute([$u['id'],$username]);$inv=$stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$inv) vpnappError(404,'Service does not belong to user');
+    $panel=vpnappPanel($db,$panelCode);
+    if ($inv['Service_location']!==$panel['name_panel']) vpnappError(400,'Service panel mismatch');
+    $plan=vpnappProduct($db,$u['agent'],$panel,$planCode);
+    $price=(int)round((int)$plan['price_product']*(100-(int)$u['pricediscount'])/100);
+    if ($price<=0 || $price>1000000) vpnappError(400,'Renewal amount unsupported');
+    // A pending external operation is not retried by changing the client key.
+    vpnappNewOrder($db,$u,'renewal',$key);
+    $reserve=$db->prepare("UPDATE user SET Balance=Balance-? WHERE id=? AND Balance>=? AND User_Status!='block'");
+    $reserve->execute([$price,$u['id'],$price]);
+    if ($reserve->rowCount()!==1) {
+        vpnappUpdate($db,$key,'failed',['result'=>['id'=>$key,'status'=>'failed','reason'=>'insufficient_wallet']]);
+        vpnappError(409,'Insufficient wallet balance');
+    }
+    $manage=new ManagePanel();
+    try {
+        $out=$manage->extend($panel['Methodextend'], $plan['Volume_constraint'],
+                            $plan['Service_time'],$username,$plan['code_product'],
+                            $panel['code_panel']);
+    } catch (Throwable $e) {
+        // Leave charged funds pending review: the panel may have renewed just
+        // before a network timeout. Never retry automatically.
+        vpnappUpdate($db,$key,'unknown',['result'=>['id'=>$key,
+            'status'=>'unknown','needs_review'=>true]]);
+        return ['id'=>$key,'status'=>'unknown','needs_review'=>true];
+    }
+    if (!is_array($out) || empty($out['status'])) {
+        $db->prepare("UPDATE user SET Balance=Balance+? WHERE id=?")
+            ->execute([$price,$u['id']]);
+        vpnappUpdate($db,$key,'failed',['result'=>['id'=>$key,'status'=>'failed',
+            'reason'=>'panel_failed']]);
+        return ['id'=>$key,'status'=>'failed','reason'=>'panel_failed'];
+    }
+    $db->prepare("UPDATE invoice SET Status='active',name_product=?,price_product=?
+        WHERE id_user=? AND username=?")->execute([$plan['name_product'],$price,$u['id'],$username]);
+    $result=['id'=>$key,'status'=>'fulfilled','service'=>$username,
+             'amount_toman'=>$price];
+    vpnappUpdate($db,$key,'fulfilled',['result'=>$result]);
+    vpnappNotify('✅ تمدید از اپ VPN'. "\n".
+        'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
+        'سرویس: '.htmlspecialchars($username,ENT_QUOTES,'UTF-8'). "\n".
+        'مبلغ: '.number_format($price).' تومان',$u['id']);
+    return $result;
+}
+
 function vpnappReceiptInfo(PDO $db, $u, $order) {
     $stmt=$db->prepare("SELECT o.external_id,o.kind,o.status,o.invoice_id,o.payment_id,
         p.payment_Status AS payment_status,i.Status AS service_status
@@ -291,6 +373,7 @@ try {
         'agent'=>$u['agent'],'blocked'=>false]);
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
     if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
+    if ($action==='services') vpnappReply(200,['ok'=>true,'items'=>vpnappServices($pdo,$u)]);
     if ($action==='order_status') vpnappReply(200,['ok'=>true,
         'order'=>vpnappReceiptInfo($pdo,$u,(string)($input['order_id']??''))]);
     if ($action==='receipt') {
@@ -298,6 +381,19 @@ try {
             vpnappError(403,'Checkout disabled');
         vpnappReply(200,['ok'=>true,'receipt'=>vpnappSubmitReceipt($pdo,$u,
             (string)($input['order_id']??''),$input['image_base64']??'')]);
+    }
+    if ($action==='renew_wallet') {
+        if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
+            vpnappError(403,'Checkout disabled');
+        $key=(string)($input['order_id']??'');
+        $previous=vpnappExisting($pdo,$u,$key);
+        if ($previous) {
+            vpnappReply(200,['ok'=>true,'order'=>json_decode($previous['result_json']??'null',true)
+                ?:['id'=>$key,'status'=>$previous['status']]]);
+        }
+        $result=vpnappRenewWallet($pdo,$u,$key,
+            $input['username']??null,$input['panel_code']??null,$input['plan_code']??null);
+        vpnappReply(200,['ok'=>true,'order'=>$result]);
     }
     if ($action==='checkout') {
         if (getenv('MIRZA_VPNAPP_CHECKOUT_ENABLED')!=='1')
