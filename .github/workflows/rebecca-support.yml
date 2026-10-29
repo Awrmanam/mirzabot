@@ -47,6 +47,7 @@ jobs:
           php -l index.php
           php -l app_pairing.php
           php -l api/vpnapp.php
+          php -l cronbot/vpnapp_renew.php
           php -l tests/vpnapp_store_static.php
           php -l tests/app_pairing_static.php
           php -l table.php
