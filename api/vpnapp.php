@@ -233,13 +233,22 @@ function vpnappCardRenew(PDO $db, $u, $key, $username, $panelCode, $planCode) {
 }
 
 function vpnappReceiptInfo(PDO $db, $u, $order) {
-    $stmt=$db->prepare("SELECT o.external_id,o.kind,o.status,o.invoice_id,o.payment_id,
+    $stmt=$db->prepare("SELECT o.external_id,o.kind,o.status,o.invoice_id,o.payment_id,o.result_json,
         p.payment_Status AS payment_status,i.Status AS service_status
         FROM vpnapp_orders o LEFT JOIN Payment_report p ON p.id_order=o.payment_id
         LEFT JOIN invoice i ON i.id_invoice=o.invoice_id
         WHERE o.owner_id=? AND o.external_id=? LIMIT 1");
     $stmt->execute([$u['id'],$order]);$result=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$result) vpnappError(404,'Order not found');
+    $stored=json_decode($result['result_json']??'null',true);
+    if (is_array($stored)) {
+        $public=isset($stored['public']) && is_array($stored['public'])
+            ? $stored['public'] : $stored;
+        foreach (['card_number','card_holder','amount_toman'] as $field) {
+            if (isset($public[$field])) $result[$field]=$public[$field];
+        }
+    }
+    unset($result['result_json']);
     if ($result['kind']==='card' &&
         $result['payment_status']==='paid' && $result['service_status']==='active') {
         $result['status']='fulfilled';
