@@ -401,25 +401,32 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         return [$ok,$status,substr($error,0,220)];
     };
 
-    // First use Mirza's configured payment report topic. A broken topic must
-    // not swallow a customer's receipt, so retry the general group once.
+    // Keep Mirza's payment group as the original moderation destination.
+    // Send a private admin copy for *receipt photos* as well, since the
+    // operator may not monitor that group. Non-receipt notices use private
+    // admins only if the report group fails.
+    $reportSent=false;
     if ($chatId!=='') {
         [$ok,$http,$error]=$send($chatId,true,$photo!==null);
-        if ($ok) return true;
-        error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
-        if ($thread && $http===400 &&
-            (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
-            [$ok,$http,$error]=$send($chatId,false,$photo!==null);
-            if ($ok) return true;
-            error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+        $reportSent=$ok;
+        if (!$ok) {
+            error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
+            if ($thread && $http===400 &&
+                (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
+                [$ok,$http,$error]=$send($chatId,false,$photo!==null);
+                $reportSent=$ok;
+                if (!$ok) error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+            }
         }
     } else {
         error_log('[vpnapp] Payment report group not configured; trying admin private chats');
     }
+    if ($reportSent && $photo===null) return true;
 
-    // Mirror the existing bot's admin authorization table. Only fall back
-    // when the normal report destination failed; avoid duplicate alerts.
-    // Admins must have started the bot for Telegram to accept private sends.
+    // Authorized bot administrators only. Receipt alert copies make sure
+    // the shop owner sees a review request even if a report topic is muted.
+    // Telegram requires these admins to have started a private bot chat.
+    $adminSent=false;
     try {
         $admins=$pdo->query("SELECT id_admin FROM admin LIMIT 10")->fetchAll(PDO::FETCH_COLUMN);
         foreach ($admins as $adminId) {
@@ -427,15 +434,15 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
             if (!preg_match('/^[1-9][0-9]{0,19}$/D',$adminId)) continue;
             [$ok,$http,$error]=$send($adminId,false,$photo!==null);
             if ($ok) {
-                error_log('[vpnapp] Telegram report delivered via authorized admin fallback');
-                return true;
+                $adminSent=true;
+            } else {
+                error_log('[vpnapp] Admin receipt notice failed: HTTP '.$http.'; '.$error);
             }
-            error_log('[vpnapp] Admin fallback delivery failed: HTTP '.$http.'; '.$error);
         }
     } catch (Throwable $e) {
-        error_log('[vpnapp] Telegram admin fallback could not read admin destinations');
+        error_log('[vpnapp] Telegram admin notification could not read destinations');
     }
-    return false;
+    return $reportSent || $adminSent;
 }
 function vpnappExisting(PDO $db, $u, $key) {
     $stmt=$db->prepare("SELECT * FROM vpnapp_orders WHERE external_id=? AND owner_id=?");
