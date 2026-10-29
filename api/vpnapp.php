@@ -116,6 +116,28 @@ function vpnappInvoices(PDO $db, $u) {
     }
     return $items;
 }
+function vpnappServicesIndex(PDO $db, $u) {
+    // Fast customer-facing list from local invoices: do not query 30 remote
+    // panels synchronously when merely opening the VPN app storefront.
+    $stmt=$db->prepare("SELECT i.username,i.Service_location,i.name_product,
+        i.Volume,i.Service_time,i.Status,i.time_sell,
+        p.code_panel AS panel_code,p.name_panel AS panel_name,p.type AS provider_type
+        FROM invoice i LEFT JOIN marzban_panel p ON p.name_panel=i.Service_location
+        WHERE i.id_user=? AND i.Status!='Unpaid'
+        ORDER BY i.time_sell DESC LIMIT 30");
+    $stmt->execute([$u['id']]);
+    $items=[];
+    foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $inv) {
+        $items[]=['username'=>$inv['username'],'panel'=>$inv['Service_location'],
+            'panel_code'=>$inv['panel_code'],
+            'panel_name'=>$inv['panel_name']?:$inv['Service_location'],
+            'provider_type'=>$inv['provider_type'],
+            'plan_name'=>$inv['name_product'],'quota_gb'=>(float)$inv['Volume'],
+            'days'=>(int)$inv['Service_time'],'status'=>$inv['Status'],
+            'subscription_url'=>null];
+    }
+    return $items;
+}
 function vpnappServices(PDO $db, $u) {
     $stmt=$db->prepare("SELECT i.username,i.Service_location,i.name_product,i.Volume,i.Service_time,i.Status,
         p.code_panel AS panel_code,p.name_panel AS panel_name,p.type AS provider_type
@@ -500,6 +522,7 @@ try {
         'agent'=>$u['agent'],'blocked'=>false]);
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
     if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
+    if ($action==='services_index') vpnappReply(200,['ok'=>true,'items'=>vpnappServicesIndex($pdo,$u)]);
     if ($action==='services') vpnappReply(200,['ok'=>true,'items'=>vpnappServices($pdo,$u)]);
     if ($action==='order_status') vpnappReply(200,['ok'=>true,
         'order'=>vpnappReceiptInfo($pdo,$u,(string)($input['order_id']??''))]);
