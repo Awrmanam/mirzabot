@@ -1,8 +1,8 @@
 name: VPN app pending checkout safety
 on:
   push:
-    branches: [fix/vpnapp-multiple-pending-receipts-20261030, fix/vpnapp-admin-snapshot-collations-20261030, fix/async-receipt-telegram-20261030, fix/reconcile-receipt-pending-20261030, fix/live-legacy-receipt-compat-20261030, fix/restore-card-autoconfirm-clock-20261030]
-    paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/patch_vpnapp_telegram_receipts.py', 'scripts/**', '.github/workflows/vpnapp-checkout-safety.yml']
+    branches: [fix/vpnapp-multiple-pending-receipts-20261030, fix/vpnapp-admin-snapshot-collations-20261030, fix/async-receipt-telegram-20261030, fix/reconcile-receipt-pending-20261030, fix/live-legacy-receipt-compat-20261030, fix/restore-card-autoconfirm-clock-20261030, fix/card-bank-autoconfirm-app-compat-20261030]
+    paths: ['api/vpnapp.php', 'payment/card.php', 'payment/card_auto_match.php', 'scripts/**', '.github/workflows/vpnapp-checkout-safety.yml']
   pull_request:
     branches: [feature/vpn-app-store-bridge-20261029, fix/vpnapp-multiple-pending-receipts-20261030, feature/vpnapp-private-receipt-review-20261030]
     paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/patch_vpnapp_telegram_receipts.py', 'scripts/**']
@@ -18,6 +18,9 @@ jobs:
           php -l scripts/vpnapp_receipt_worker.php
           php -l scripts/inspect_vpnapp_receipts.php
           php -l scripts/diagnose_card_autoconfirm.php
+          php -l payment/card.php
+          php -l payment/card_auto_match.php
+          php scripts/tests/test_bank_card_auto_match.php
           python3 -m py_compile scripts/inspect_vpnapp_live_layout.py
       - name: Receipt systemd installer syntax
         run: |
@@ -39,3 +42,4 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_legacy_checkout_sql.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_no_gallery.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_fix_auto_confirm_clock.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_install_bank_card_auto.py' -v
