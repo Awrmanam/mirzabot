@@ -153,8 +153,8 @@ if (isset($amountInteger) && is_numeric($amountInteger) &&
         } catch (Throwable $error) {
             // Never blindly re-run provisioning or balance credit after an
             // external-panel exception: operations may be partially complete.
-            error_log('[Mirza bank auto] Claimed payment needs MANUAL provisioning review: '
-                .$error->getMessage());
+            error_log('[Mirza bank auto] Claimed payment needs MANUAL provisioning review; exception type: '
+                .get_class($error));
             return;
         }
     $balanceformatsell = number_format(mysqli_fetch_assoc(mysqli_query($connect, "SELECT (Balance) FROM user WHERE id = '{$Payment_report['id_user']}' LIMIT 1"))['Balance'], 0);
