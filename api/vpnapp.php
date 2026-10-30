@@ -299,6 +299,9 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
     }
     if (in_array($result['kind'],['card','renewal_card'],true)) {
         $result['notification_delivered']=!empty($stored['receipt_notice_sent']);
+        $result['receipt_stored']=vpnappPrivateReceiptExists($order);
+        $result['notification_queued']=$result['receipt_stored'] &&
+            !$result['notification_delivered'];
     }
     unset($result['result_json']);
     // Only the original invoice's *active* status confirms provisioning.
