@@ -1,0 +1,24 @@
+name: Receipt worker paid-status compatibility
+
+on:
+  push:
+    branches:
+      - fix/receipt-worker-paid-compat-20261030
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Isolated worker PHP syntax
+        run: php -l scripts/vpnapp_receipt_worker.php
+      - name: Installer shell syntax
+        run: bash -n scripts/deploy_receipt_worker_paid.sh
+      - name: Do not modify card payment records in worker
+        run: |
+          grep -Fq "['waiting','paid']" scripts/vpnapp_receipt_worker.php
+          ! grep -Ei 'UPDATE Payment_report|INSERT INTO Payment_report' scripts/vpnapp_receipt_worker.php
