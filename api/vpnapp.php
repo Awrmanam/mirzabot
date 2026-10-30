@@ -778,12 +778,21 @@ function vpnappAdminSnapshot(PDO $db) {
         o.kind,o.status,o.created_at,o.updated_at,o.result_json,
         i.username AS service_username,i.Service_location AS panel_name,
         i.name_product AS plan_name,i.price_product AS amount_toman,
-        p.payment_Status AS payment_status
+        i.Status AS invoice_status, p.payment_Status AS payment_status
         FROM vpnapp_orders o
         LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
         LEFT JOIN Payment_report p ON p.id_order=o.payment_id AND p.id_user=o.owner_id
         ORDER BY o.created_at DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orders as &$entry) {
+        // The payment report is the one authoritative state changed by the
+        // Telegram moderation callback; the Iran admin view simply reflects it.
+        if ($entry['payment_status']==='reject' ||
+            $entry['payment_status']==='expire') {
+            $entry['status']='rejected';
+        } elseif ($entry['payment_status']==='paid') {
+            $entry['status']=($entry['kind']==='card' &&
+                $entry['invoice_status']==='active') ? 'fulfilled' : 'payment_approved';
+        }
         $info=json_decode((string)($entry['result_json']??''),true);
         $entry['receipt_notice_sent']=is_array($info) && !empty($info['receipt_notice_sent']);
         $entry['receipt_send_attempts']=is_array($info)
