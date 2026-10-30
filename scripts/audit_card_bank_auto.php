@@ -40,6 +40,25 @@ try {
         FROM Payment_report WHERE Payment_Method='cart to cart'");
     $c=$q->fetch(PDO::FETCH_ASSOC)?:[];
     foreach($c as $k=>$v)echo "card_".$k."=".(int)$v.PHP_EOL;
+    // Payment may be correctly verified by the bank yet provisioning can
+    // fail independently; report these cases for the administrator.
+    $q=$pdo->query("SELECT id_invoice FROM Payment_report
+        WHERE Payment_Method='cart to cart' AND payment_Status='paid'
+          AND id_invoice LIKE 'getconfigafterpay|%'
+        ORDER BY time DESC LIMIT 100");
+    $service=$pdo->prepare("SELECT Status FROM invoice WHERE username=? LIMIT 1");
+    $active=0; $needsReview=0;
+    foreach($q->fetchAll(PDO::FETCH_ASSOC) as $payment) {
+        $parts=explode('|',(string)$payment['id_invoice'],2);
+        if (count($parts)!==2) continue;
+        $service->execute([$parts[1]]);
+        if ($service->fetchColumn()==='active') $active++;
+        else $needsReview++;
+    }
+    echo "bank_paid_card_services_active=$active".PHP_EOL;
+    echo "bank_paid_card_services_not_active=$needsReview".PHP_EOL;
+    if ($needsReview>0)
+        echo "WARNING: Bank-verified payments without active service require manual provisioning reconciliation".PHP_EOL;
     echo "NOTE: An ON bank mode does not confirm a receipt by photo alone. A legitimate bank notification must reach payment/card.php.".PHP_EOL;
     echo "NOTE: Same-amount open orders require manual review; a bank SMS does not identify a customer.".PHP_EOL;
     echo "NOTE: A paid bank record alone does not prove VPN service provisioning succeeded.".PHP_EOL;
