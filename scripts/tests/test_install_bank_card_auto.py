@@ -8,6 +8,11 @@ patcher=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(patcher)
 
 class BankAutoRestoreTests(unittest.TestCase):
+    def test_installer_exactly_matches_reviewed_bank_callback(self):
+        code=(ROOT.parent / "payment" / "card.php").read_text(encoding="utf-8")
+        self.assertTrue(code.endswith(patcher.NEW_TAIL))
+        self.assertEqual(code.count(patcher.REQUIRE),1)
+
     def legacy(self):
         return ("<?php\n"
                 "// preserve all customized bank SMS parsers here\n"
