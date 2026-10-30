@@ -17,6 +17,7 @@ jobs:
           php -l scripts/inspect_vpnapp_orders.php
           php -l scripts/vpnapp_receipt_worker.php
           php -l scripts/inspect_vpnapp_receipts.php
+          python3 -m py_compile scripts/inspect_vpnapp_live_layout.py
       - name: Receipt systemd installer syntax
         run: |
           bash -n scripts/install_vpnapp_async_receipt.sh
@@ -31,3 +32,4 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_async_receipt.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_unblock_card_orders.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_legacy_receipts.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_vpnapp_live_layout.py' -v
