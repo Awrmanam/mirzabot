@@ -682,7 +682,11 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
         $update=$db->prepare("UPDATE Payment_report
             SET payment_Status='waiting',at_updated=?,dec_not_confirmed='VPN app receipt'
             WHERE id_order=? AND id_user=? AND payment_Status='Unpaid'");
-        $update->execute([date('Y/m/d H:i:s'),$order['payment_id'],$u['id']]);
+        // Legacy croncard.php parses at_updated in Asia/Tehran. Store the
+        // matching wall-clock timezone, independent of PHP-FPM server TZ.
+        $confirmedAt=(new DateTimeImmutable('now',
+            new DateTimeZone('Asia/Tehran')))->format('Y/m/d H:i:s');
+        $update->execute([$confirmedAt,$order['payment_id'],$u['id']]);
         if ($update->rowCount()!=1) {
             $db->rollBack();vpnappError(409,'Payment is not pending');
         }
