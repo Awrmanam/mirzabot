@@ -281,8 +281,11 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
         p.payment_Status AS payment_status,i.Status AS service_status,
         i.username AS service_username,i.Service_location AS panel_name,
         i.name_product AS plan_name,i.price_product AS invoice_amount
-        FROM vpnapp_orders o LEFT JOIN Payment_report p ON p.id_order=o.payment_id
-        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
+        FROM vpnapp_orders o LEFT JOIN Payment_report p
+            ON p.id_order COLLATE utf8mb4_unicode_ci =
+               o.payment_id COLLATE utf8mb4_unicode_ci
+        LEFT JOIN invoice i ON i.id_invoice COLLATE utf8mb4_unicode_ci =
+               o.invoice_id COLLATE utf8mb4_unicode_ci AND i.id_user=o.owner_id
         WHERE o.owner_id=? AND o.external_id=? LIMIT 1");
     $stmt->execute([$u['id'],$order]);$result=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$result) vpnappError(404,'Order not found');
@@ -296,6 +299,9 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
     }
     if (in_array($result['kind'],['card','renewal_card'],true)) {
         $result['notification_delivered']=!empty($stored['receipt_notice_sent']);
+        $result['receipt_stored']=vpnappPrivateReceiptExists($order);
+        $result['notification_queued']=$result['receipt_stored'] &&
+            !$result['notification_delivered'];
     }
     unset($result['result_json']);
     // Only the original invoice's *active* status confirms provisioning.
@@ -389,6 +395,21 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$fields,
             CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>5,
             CURLOPT_TIMEOUT=>16]);
+        // Optional proxy for Telegram delivery from a restricted Mirza host.
+        // SOCKS5H resolves api.telegram.org remotely through the proxy.
+        $socks=trim((string)getenv('MIRZA_VPNAPP_TELEGRAM_SOCKS5_PROXY'));
+        if ($socks!=='') {
+            $parsed=parse_url($socks);
+            if (!is_array($parsed) || ($parsed['scheme']??'')!=='socks5h' ||
+                empty($parsed['host']) || !isset($parsed['port']) ||
+                (int)$parsed['port']<1 || (int)$parsed['port']>65535 ||
+                isset($parsed['user']) || isset($parsed['pass'])) {
+                curl_close($ch);
+                return [false,0,'invalid Telegram proxy setting'];
+            }
+            curl_setopt($ch,CURLOPT_PROXY,$parsed['host'].':'.$parsed['port']);
+            curl_setopt($ch,CURLOPT_PROXYTYPE,CURLPROXY_SOCKS5_HOSTNAME);
+        }
         $response=curl_exec($ch);
         $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
         $curlError=curl_error($ch);
@@ -539,8 +560,10 @@ function vpnappPrivateReceiptDir() {
 function vpnappReceiptFile($key, $mime) {
     if (!preg_match('/^[0-9a-f-]{36}$/D',(string)$key)) return null;
     $ext=$mime==='image/png'?'.png':'.jpg';
-    return vpnappPrivateReceiptDir().'/'.
-        hash_hmac('sha256',(string)$key,(string)getenv('MIRZA_APP_BRIDGE_SECRET')).$ext;
+    // Same path from PHP-FPM and CLI worker; their environment variables
+    // may differ. The random 128-bit order identifier + a 0700 private dir
+    // prevent directory enumeration or public receipt exposure.
+    return vpnappPrivateReceiptDir().'/'.hash('sha256',(string)$key).$ext;
 }
 function vpnappPersistReceipt($key, $data, $mime) {
     $directory=vpnappPrivateReceiptDir();
@@ -613,6 +636,12 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     // it must never create a second payment or repeat too rapidly.
     $lastAttempt=(int)($stored['receipt_last_attempt_at']??0);
     $sendAttempts=(int)($stored['receipt_send_attempts']??0);
+    if ($order['status']==='waiting' && !empty($stored['receipt_notice_sent'])) {
+        $db->commit();
+        return ['status'=>'waiting','notification_delivered'=>true,
+                'notification_queued'=>false,
+                'receipt_stored'=>vpnappPrivateReceiptExists($key)];
+    }
     if ($lastAttempt>time()-30) {
         $db->rollBack();
         vpnappError(429,'Wait 30 seconds before retrying this receipt');
@@ -627,6 +656,10 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     // Only after verifying the authenticated owner and an eligible order
     // can the receipt be written to a private, non-public directory.
     $privateStored=vpnappPersistReceipt($key,$data,$kind);
+    if (!$privateStored) {
+        $db->rollBack();
+        vpnappError(503,'Private receipt storage is unavailable; retry later');
+    }
     if ($order['status']==='awaiting_receipt') {
         $update=$db->prepare("UPDATE Payment_report
             SET payment_Status='waiting',at_updated=?,dec_not_confirmed='VPN app receipt'
@@ -638,48 +671,21 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
         $db->prepare("UPDATE vpnapp_orders SET status='waiting',updated_at=?
             WHERE external_id=? AND owner_id=?")->execute([time(),$key,$u['id']]);
     }
-    // Reserve a retry attempt before leaving the locked transaction;
-    // parallel mobile requests cannot flood Telegram with the same receipt.
-    $stored['receipt_last_attempt_at']=time();
-    $stored['receipt_send_attempts']=$sendAttempts+1;
-    // A previous group notification is not proof of a private admin photo;
-    // reset the confirmation before each intentional retry.
+    // Saving the image and marking payment 'waiting' is the checkout
+    // transaction. Telegram is delivered by a separate CLI worker using
+    // the private receipt file; never hold the mobile HTTP request for
+    // multiple 16s sendPhoto calls (which caused Iran Nginx HTTP 504).
+    // Keep attempts from earlier retries. Re-upload never circumvents the
+    // bounded retry limit or creates duplicate notifications after delivery.
+    $stored['receipt_last_attempt_at']=$lastAttempt;
+    $stored['receipt_send_attempts']=$sendAttempts;
     $stored['receipt_notice_sent']=false;
     $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
         WHERE external_id=? AND owner_id=?")->execute([
         json_encode($stored,JSON_UNESCAPED_UNICODE),time(),$key,$u['id']]);
     $db->commit();
-
-    $sent=false;
-    $tmp=tempnam(sys_get_temp_dir(),'vpnreceipt_');
-    if ($tmp!==false) {
-        try {
-            if (file_put_contents($tmp,$data,LOCK_EX)!==false) {
-                @chmod($tmp,0600);
-                $sent=vpnappNotify('🧾 رسید کارت‌به‌کارت از اپ VPN'. "\n".
-                    'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
-                    'پیگیری: '.htmlspecialchars($order['payment_id'],ENT_QUOTES,'UTF-8'). "\n".
-                    'وضعیت: منتظر پردازش میرزا', $u['id'],$tmp,$order['payment_id']);
-            }
-        } finally { @unlink($tmp); }
-    }
-    if ($sent) {
-        $db->beginTransaction();
-        $query=$db->prepare("SELECT result_json FROM vpnapp_orders
-            WHERE owner_id=? AND external_id=? FOR UPDATE");
-        $query->execute([$u['id'],$key]);
-        $latest=json_decode((string)$query->fetchColumn(),true);
-        if (!is_array($latest)) $latest=[];
-        $latest['receipt_notice_sent']=true;
-        $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
-            WHERE owner_id=? AND external_id=?")->execute([
-            json_encode($latest,JSON_UNESCAPED_UNICODE),time(),$u['id'],$key]);
-        $db->commit();
-    } else {
-        error_log('[vpnapp] Receipt saved but Telegram report delivery unconfirmed');
-    }
-    return ['status'=>'waiting','notification_delivered'=>$sent,
-        'receipt_stored'=>$privateStored];
+    return ['status'=>'waiting','notification_delivered'=>false,
+            'notification_queued'=>true,'receipt_stored'=>true];
 }
 function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
     // Mirza's own panel manager and invoice records are authoritative.
