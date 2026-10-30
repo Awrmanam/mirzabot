@@ -5,7 +5,7 @@ set -Eeuo pipefail
 LIVE=/var/www/mirzaprobotconfig/scripts/vpnapp_receipt_worker.php
 BRANCH=fix/receipt-worker-paid-compat-20261030
 EXPECTED_OLD=ac266404275c372845da6b496432608c88de59fd
-EXPECTED_NEW=49f8ff90ecd9458fe77052831bbb46c32d7be0ac
+EXPECTED_NEW=b3393cfe35ebe89afa3f97f3bc15f304859d7902
 
 [[ ${EUID} -eq 0 ]] || { echo 'STOP: run as root'; exit 2; }
 [[ -f "$LIVE" ]] || { echo "STOP: Mirza worker missing"; exit 2; }
