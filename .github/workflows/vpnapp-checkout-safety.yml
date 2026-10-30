@@ -20,7 +20,9 @@ jobs:
           php -l scripts/diagnose_card_autoconfirm.php
           php -l payment/card.php
           php -l payment/card_auto_match.php
+          php -l scripts/audit_card_bank_auto.php
           php scripts/tests/test_bank_card_auto_match.php
+          python3 -m py_compile scripts/install_bank_card_auto.py
           python3 -m py_compile scripts/inspect_vpnapp_live_layout.py
       - name: Receipt systemd installer syntax
         run: |
