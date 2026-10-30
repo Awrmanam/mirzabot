@@ -281,8 +281,11 @@ function vpnappReceiptInfo(PDO $db, $u, $order) {
         p.payment_Status AS payment_status,i.Status AS service_status,
         i.username AS service_username,i.Service_location AS panel_name,
         i.name_product AS plan_name,i.price_product AS invoice_amount
-        FROM vpnapp_orders o LEFT JOIN Payment_report p ON p.id_order=o.payment_id
-        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
+        FROM vpnapp_orders o LEFT JOIN Payment_report p
+            ON p.id_order COLLATE utf8mb4_unicode_ci =
+               o.payment_id COLLATE utf8mb4_unicode_ci
+        LEFT JOIN invoice i ON i.id_invoice COLLATE utf8mb4_unicode_ci =
+               o.invoice_id COLLATE utf8mb4_unicode_ci AND i.id_user=o.owner_id
         WHERE o.owner_id=? AND o.external_id=? LIMIT 1");
     $stmt->execute([$u['id'],$order]);$result=$stmt->fetch(PDO::FETCH_ASSOC);
     if (!$result) vpnappError(404,'Order not found');
