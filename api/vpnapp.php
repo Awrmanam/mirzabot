@@ -560,8 +560,10 @@ function vpnappPrivateReceiptDir() {
 function vpnappReceiptFile($key, $mime) {
     if (!preg_match('/^[0-9a-f-]{36}$/D',(string)$key)) return null;
     $ext=$mime==='image/png'?'.png':'.jpg';
-    return vpnappPrivateReceiptDir().'/'.
-        hash_hmac('sha256',(string)$key,(string)getenv('MIRZA_APP_BRIDGE_SECRET')).$ext;
+    // Same path from PHP-FPM and CLI worker; their environment variables
+    // may differ. The random 128-bit order identifier + a 0700 private dir
+    // prevent directory enumeration or public receipt exposure.
+    return vpnappPrivateReceiptDir().'/'.hash('sha256',(string)$key).$ext;
 }
 function vpnappPersistReceipt($key, $data, $mime) {
     $directory=vpnappPrivateReceiptDir();
