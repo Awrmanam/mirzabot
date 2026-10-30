@@ -16,6 +16,7 @@ jobs:
           php -l api/vpnapp.php
           php -l scripts/inspect_vpnapp_orders.php
           php -l scripts/vpnapp_receipt_worker.php
+          php -l scripts/inspect_vpnapp_receipts.php
       - name: Receipt systemd installer syntax
         run: |
           bash -n scripts/install_vpnapp_async_receipt.sh
