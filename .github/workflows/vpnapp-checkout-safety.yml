@@ -34,3 +34,4 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_legacy_receipts.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_vpnapp_live_layout.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_legacy_checkout_sql.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_no_gallery.py' -v
