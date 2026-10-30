@@ -349,8 +349,8 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
     $setting=$pdo->query("SELECT Channel_Report FROM setting LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $chatId=trim((string)($setting['Channel_Report']??''));
     $botToken=trim((string)($APIKEY??''));
-    if ($chatId==='' || $botToken==='') {
-        error_log('[vpnapp] Telegram notice skipped: missing report group or bot token');
+    if ($botToken==='') {
+        error_log('[vpnapp] Telegram notice skipped: missing bot token');
         return false;
     }
     $topic=$pdo->prepare("SELECT idreport FROM topicid WHERE report='paymentreport' LIMIT 1");
@@ -367,9 +367,9 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
                     ['text'=>'مسدودسازی','callback_data'=>'blockuserfake_'.$buttonId]];
     }
 
-    $send=function($withThread, $attachment) use
-        ($chatId,$botToken,$thread,$buttons,$text,$photo) {
-        $fields=['chat_id'=>$chatId,'parse_mode'=>'HTML'];
+    $send=function($destination, $withThread, $attachment) use
+        ($botToken,$thread,$buttons,$text,$photo) {
+        $fields=['chat_id'=>$destination,'parse_mode'=>'HTML'];
         if ($withThread && $thread) $fields['message_thread_id']=$thread;
         if ($buttons) $fields['reply_markup']=json_encode(
             ['inline_keyboard'=>$buttons],JSON_UNESCAPED_UNICODE);
@@ -401,21 +401,53 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         return [$ok,$status,substr($error,0,220)];
     };
 
-    [$ok,$http,$error]=$send(true,$photo!==null);
-    if ($ok) return true;
-    error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
-    // A forum topic can be deleted or inaccessible while the group still
-    // works; retry to the configured group's general chat in that case.
-    if ($thread && $http===400 &&
-        (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
-        [$ok,$http,$error]=$send(false,$photo!==null);
-        if ($ok) {
-            error_log('[vpnapp] Telegram report sent to group without invalid topic');
-            return true;
+    // Keep Mirza's payment group as the original moderation destination.
+    // Send a private admin copy for *receipt photos* as well, since the
+    // operator may not monitor that group. Non-receipt notices use private
+    // admins only if the report group fails.
+    $reportSent=false;
+    if ($chatId!=='') {
+        [$ok,$http,$error]=$send($chatId,true,$photo!==null);
+        $reportSent=$ok;
+        if (!$ok) {
+            error_log('[vpnapp] Telegram report delivery failed: HTTP '.$http.'; '.$error);
+            if ($thread && $http===400 &&
+                (stripos($error,'thread')!==false || stripos($error,'topic')!==false)) {
+                [$ok,$http,$error]=$send($chatId,false,$photo!==null);
+                $reportSent=$ok;
+                if (!$ok) error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+            }
         }
-        error_log('[vpnapp] Telegram group fallback failed: HTTP '.$http.'; '.$error);
+    } else {
+        error_log('[vpnapp] Payment report group not configured; trying admin private chats');
     }
-    return false;
+    if ($reportSent && $photo===null) return true;
+
+    // Authorized bot administrators only. Receipt alert copies make sure
+    // the shop owner sees a review request even if a report topic is muted.
+    // Telegram requires these admins to have started a private bot chat.
+    $adminSent=false;
+    try {
+        $admins=$pdo->query("SELECT id_admin FROM admin LIMIT 10")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($admins as $adminId) {
+            $adminId=trim((string)$adminId);
+            if (!preg_match('/^[1-9][0-9]{0,19}$/D',$adminId)) continue;
+            [$ok,$http,$error]=$send($adminId,false,$photo!==null);
+            if ($ok) {
+                $adminSent=true;
+            } else {
+                error_log('[vpnapp] Admin receipt notice failed: HTTP '.$http.'; '.$error);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[vpnapp] Telegram admin notification could not read destinations');
+    }
+    // A receipt is counted as delivered to the owner only if an authorized
+    // administrator's private Telegram actually accepted the photo. Sending
+    // into a group is useful but does not prove a private admin alert.
+    if ($photo!==null && !$adminSent)
+        error_log('[vpnapp] Receipt photo was NOT delivered to a private bot admin');
+    return $photo!==null ? $adminSent : ($reportSent || $adminSent);
 }
 function vpnappExisting(PDO $db, $u, $key) {
     $stmt=$db->prepare("SELECT * FROM vpnapp_orders WHERE external_id=? AND owner_id=?");
@@ -429,11 +461,28 @@ function vpnappNewOrder(PDO $db, $u, $kind, $key) {
     $lock=$db->prepare("SELECT GET_LOCK(?,10)");
     $lock->execute(['vpnapp_account_'.$u['id']]);
     if ((int)$lock->fetchColumn()!==1) vpnappError(409,'Checkout currently busy');
+    // Uncertain wallet/panel operations must be reconciled before another
+    // checkout, so a timeout never accidentally charges the user twice.
+    // A card receipt already submitted for manual review is different:
+    // keeping its review open must not lock all unrelated new purchases.
     $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders WHERE owner_id=?
         AND (status='unknown' OR
-             (status IN ('processing','awaiting_receipt','waiting') AND created_at>?))");
+             (status IN ('processing','awaiting_receipt') AND created_at>?))");
     $stmt->execute([$u['id'],time()-86400]);
-    if ((int)$stmt->fetchColumn()>0) vpnappError(409,'A previous order is still pending');
+    if ((int)$stmt->fetchColumn()>0)
+        vpnappError(409,'A previous order needs reconciliation before checkout');
+    // Limit unreviewed card receipts and rapid repeat purchases; never
+    // approve, delete or mutate any of those existing payment records.
+    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders
+        WHERE owner_id=? AND status='waiting' AND created_at>?");
+    $stmt->execute([$u['id'],time()-86400]);
+    if ((int)$stmt->fetchColumn()>=3)
+        vpnappError(429,'Too many receipts awaiting review today');
+    $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders
+        WHERE owner_id=? AND created_at>?");
+    $stmt->execute([$u['id'],time()-86400]);
+    if ((int)$stmt->fetchColumn()>=10)
+        vpnappError(429,'Daily checkout limit reached');
     $stmt=$db->prepare("INSERT INTO vpnapp_orders(external_id,owner_id,kind,status,created_at,updated_at) VALUES(?,?,?,?,?,?)");
     $stmt->execute([$key,$u['id'],$kind,'processing',time(),time()]);
 }
@@ -500,9 +549,18 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     if (!$order) {$db->rollBack();vpnappError(404,'Order not found');}
     $stored=json_decode($order['result_json']??'null',true);
     if (!is_array($stored)) $stored=[];
-    if ($order['status']==='waiting' && !empty($stored['receipt_notice_sent'])) {
-        $db->commit();
-        return ['status'=>'waiting','notification_delivered'=>true];
+    // A past group success is not proof that the bot owner saw the photo.
+    // Explicit re-upload of this same order may retry private delivery, but
+    // it must never create a second payment or repeat too rapidly.
+    $lastAttempt=(int)($stored['receipt_last_attempt_at']??0);
+    $sendAttempts=(int)($stored['receipt_send_attempts']??0);
+    if ($lastAttempt>time()-30) {
+        $db->rollBack();
+        vpnappError(429,'Wait 30 seconds before retrying this receipt');
+    }
+    if ($sendAttempts>=8) {
+        $db->rollBack();
+        vpnappError(429,'Receipt delivery retry limit reached; contact support');
     }
     if (!in_array($order['status'],['awaiting_receipt','waiting'],true)) {
         $db->rollBack();vpnappError(409,'Order is not awaiting receipt');
@@ -518,6 +576,16 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
         $db->prepare("UPDATE vpnapp_orders SET status='waiting',updated_at=?
             WHERE external_id=? AND owner_id=?")->execute([time(),$key,$u['id']]);
     }
+    // Reserve a retry attempt before leaving the locked transaction;
+    // parallel mobile requests cannot flood Telegram with the same receipt.
+    $stored['receipt_last_attempt_at']=time();
+    $stored['receipt_send_attempts']=$sendAttempts+1;
+    // A previous group notification is not proof of a private admin photo;
+    // reset the confirmation before each intentional retry.
+    $stored['receipt_notice_sent']=false;
+    $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
+        WHERE external_id=? AND owner_id=?")->execute([
+        json_encode($stored,JSON_UNESCAPED_UNICODE),time(),$key,$u['id']]);
     $db->commit();
 
     $sent=false;
@@ -644,7 +712,7 @@ function vpnappAdminSnapshot(PDO $db) {
     $pending=(int)$db->query("SELECT COUNT(*) FROM vpnapp_orders
         WHERE status IN ('awaiting_receipt','waiting','unknown','processing')")->fetchColumn();
     $orders=$db->query("SELECT o.external_id AS id,o.owner_id AS telegram_id,
-        o.kind,o.status,o.created_at,o.updated_at,
+        o.kind,o.status,o.created_at,o.updated_at,o.result_json,
         i.username AS service_username,i.Service_location AS panel_name,
         i.name_product AS plan_name,i.price_product AS amount_toman,
         p.payment_Status AS payment_status
@@ -652,6 +720,14 @@ function vpnappAdminSnapshot(PDO $db) {
         LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
         LEFT JOIN Payment_report p ON p.id_order=o.payment_id AND p.id_user=o.owner_id
         ORDER BY o.created_at DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($orders as &$entry) {
+        $info=json_decode((string)($entry['result_json']??''),true);
+        $entry['receipt_notice_sent']=is_array($info) && !empty($info['receipt_notice_sent']);
+        $entry['receipt_send_attempts']=is_array($info)
+            ? (int)($info['receipt_send_attempts']??0) : 0;
+        unset($entry['result_json']); // Never expose private order payloads.
+    }
+    unset($entry);
     $panels=$db->query("SELECT name_panel,type FROM marzban_panel
         ORDER BY name_panel LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
     return ['ok'=>true,'orders_total'=>$total,'pending_orders'=>$pending,
