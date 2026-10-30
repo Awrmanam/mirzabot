@@ -8,7 +8,17 @@
  * Same-amount ambiguity must be sent for manual reconciliation.
  */
 function mirzaBankCandidateFromRows(array $rows): ?array {
-    return count($rows) === 1 ? $rows[0] : null;
+    if (count($rows) !== 1) return null;
+    $candidate=$rows[0];
+    if (!is_array($candidate)) return null;
+    // App renewals currently use an optional separate wallet-spend worker,
+    // not the legacy DirectPayment renewal branch. Do not auto-mark them
+    // paid until that worker is installed, audited and reconciled.
+    if (str_starts_with((string)($candidate['id_invoice']??''),'vpnapp_renew|')) {
+        error_log('[Mirza bank auto] App card renewal requires manual reconciliation; automatic fulfilment is not configured');
+        return null;
+    }
+    return $candidate;
 }
 function mirzaFindUniqueBankCardPayment(PDO $db, int $amount): ?array {
     if ($amount < 1) return null;
