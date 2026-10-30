@@ -33,7 +33,7 @@ class CheckoutSqlCompatibility(unittest.TestCase):
     def test_backup_is_original_and_no_double_change(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);live=root/"vpnapp.php"
-            old="<?php\n"+LEGACY_20261030
+            old="<?php\n"+LEGACY_20261030+"\nfunction nextHandler() { return 1; }\n"
             live.write_text(old)
             mod.patch(live,root/"backups")
             self.assertNotEqual(live.read_text(),old)
