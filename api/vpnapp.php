@@ -636,6 +636,12 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     // it must never create a second payment or repeat too rapidly.
     $lastAttempt=(int)($stored['receipt_last_attempt_at']??0);
     $sendAttempts=(int)($stored['receipt_send_attempts']??0);
+    if ($order['status']==='waiting' && !empty($stored['receipt_notice_sent'])) {
+        $db->commit();
+        return ['status'=>'waiting','notification_delivered'=>true,
+                'notification_queued'=>false,
+                'receipt_stored'=>vpnappPrivateReceiptExists($key)];
+    }
     if ($lastAttempt>time()-30) {
         $db->rollBack();
         vpnappError(429,'Wait 30 seconds before retrying this receipt');
@@ -669,8 +675,10 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     // transaction. Telegram is delivered by a separate CLI worker using
     // the private receipt file; never hold the mobile HTTP request for
     // multiple 16s sendPhoto calls (which caused Iran Nginx HTTP 504).
-    $stored['receipt_last_attempt_at']=0;
-    $stored['receipt_send_attempts']=0;
+    // Keep attempts from earlier retries. Re-upload never circumvents the
+    // bounded retry limit or creates duplicate notifications after delivery.
+    $stored['receipt_last_attempt_at']=$lastAttempt;
+    $stored['receipt_send_attempts']=$sendAttempts;
     $stored['receipt_notice_sent']=false;
     $db->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
         WHERE external_id=? AND owner_id=?")->execute([
