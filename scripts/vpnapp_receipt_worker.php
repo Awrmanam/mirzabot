@@ -41,7 +41,10 @@ try {
         $check=$pdo->prepare("SELECT payment_Status FROM Payment_report
             WHERE id_order=? AND id_user=? LIMIT 1");
         $check->execute([$payment,$owner]);
-        if ($check->fetchColumn()!=='waiting') continue;
+        $paymentStatus=$check->fetchColumn();
+        // Photos remain reportable after the independent one-minute
+        // auto-confirm marks payment paid. Do NOT modify financial state.
+        if (!in_array($paymentStatus,['waiting','paid'],true)) continue;
 
         $pdo->beginTransaction();
         try {
@@ -73,8 +76,10 @@ try {
         $message='🧾 رسید کارت‌به‌کارت از اپ VPN'."\n".
             'کاربر: '.htmlspecialchars($owner,ENT_QUOTES,'UTF-8')."\n".
             'پیگیری: '.htmlspecialchars($payment,ENT_QUOTES,'UTF-8')."\n".
-            'وضعیت: در انتظار بررسی';
-        $sent=vpnappNotify($message,$owner,$image,$payment);
+            'وضعیت: '.($paymentStatus==='paid'?'پرداخت قبلاً تأیید شده':'در انتظار بررسی');
+        // Never show a stale payment-approval button for an already paid order.
+        $sent=vpnappNotify($message,$owner,$image,
+            $paymentStatus==='waiting'?$payment:null);
         if ($sent) {
             $pdo->beginTransaction();
             try {
