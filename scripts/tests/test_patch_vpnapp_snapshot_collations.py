@@ -11,11 +11,10 @@ spec.loader.exec_module(patcher)
 
 
 def snapshot(fixed_first=False, fixed_second=False):
-    body = "<?php\n// preserve unrelated custom logic\n" + patcher.START + "\n"
+    body = "<?php\\n// preserve unrelated custom logic\\n" + patcher.START + '\\n  $sql = "SELECT 1\\n'
     for i, (old, new) in enumerate(patcher.FIXES):
-        body += (new if (fixed_first, fixed_second)[i] else old) + "\n"
-    return body + "}\n" + patcher.END + " unmatched\n"
-
+        body += (new if (fixed_first, fixed_second)[i] else old) + "\\n"
+    return body + '";\\n}\\n' + patcher.END + " && MIRZA_VPNAPP_LIBRARY_ONLY) return;\\n"
 
 class SnapshotCollationPatchTests(unittest.TestCase):
     def test_old_partial_and_already_fixed(self):
