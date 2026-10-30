@@ -19,3 +19,4 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_pending_orders.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_telegram_receipts.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_live_safe.py' -v
