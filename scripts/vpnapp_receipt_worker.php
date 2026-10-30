@@ -18,7 +18,7 @@ try {
         FROM vpnapp_orders WHERE status='waiting'
         ORDER BY updated_at DESC LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orders as $order) {
-        if ($delivered>=4) break; // Avoid a long-running backlog per cron invocation.
+        if ($delivered>=1) break; // Bound worst-case Telegram retry latency per systemd run.
         $stored=json_decode((string)($order['result_json']??''),true);
         if (!is_array($stored)) $stored=[];
         if (!empty($stored['receipt_notice_sent'])) continue;
