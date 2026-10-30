@@ -565,6 +565,24 @@ function vpnappReceiptFile($key, $mime) {
     // prevent directory enumeration or public receipt exposure.
     return vpnappPrivateReceiptDir().'/'.hash('sha256',(string)$key).$ext;
 }
+/**
+ * Locate an image saved by either the previous HMAC-based receipt code or the
+ * newer stable naming scheme. This is only used within a private 0700 folder.
+ * Never expose a filesystem path to the API caller.
+ */
+function vpnappFindReceipt($key, $mime) {
+    $preferred=vpnappReceiptFile($key,$mime);
+    if ($preferred && is_file($preferred) && !is_link($preferred)) return $preferred;
+    if (!preg_match('/^[0-9a-f-]{36}$/D',(string)$key)) return null;
+    $ext=$mime==='image/png'?'.png':'.jpg';
+    $secrets=[trim((string)getenv('MIRZA_APP_BRIDGE_SECRET')),''];
+    foreach (array_unique($secrets) as $secret) {
+        $path=vpnappPrivateReceiptDir().'/'.
+            hash_hmac('sha256',(string)$key,$secret).$ext;
+        if (is_file($path) && !is_link($path)) return $path;
+    }
+    return null;
+}
 function vpnappPersistReceipt($key, $data, $mime) {
     $directory=vpnappPrivateReceiptDir();
     if (!is_dir($directory) || !is_writable($directory) || is_link($directory)) {
@@ -585,8 +603,8 @@ function vpnappPersistReceipt($key, $data, $mime) {
     }
 }
 function vpnappPrivateReceiptExists($key) {
-    return is_file((string)vpnappReceiptFile($key,'image/jpeg')) ||
-        is_file((string)vpnappReceiptFile($key,'image/png'));
+    return vpnappFindReceipt($key,'image/jpeg') !== null ||
+        vpnappFindReceipt($key,'image/png') !== null;
 }
 function vpnappAdminReceipt(PDO $db, $key) {
     if (!preg_match('/^[0-9a-f-]{36}$/D',(string)$key))
@@ -596,8 +614,8 @@ function vpnappAdminReceipt(PDO $db, $key) {
     $stmt->execute([$key]);
     if (!$stmt->fetchColumn()) vpnappError(404,'Order not found');
     foreach (['image/jpeg','image/png'] as $mime) {
-        $path=vpnappReceiptFile($key,$mime);
-        if (!$path || !is_file($path) || is_link($path)) continue;
+        $path=vpnappFindReceipt($key,$mime);
+        if (!$path) continue;
         $size=filesize($path);
         if ($size===false || $size<200 || $size>1500000) continue;
         $bytes=file_get_contents($path);
