@@ -13,6 +13,7 @@ python3 "$HERE/patch_vpnapp_legacy_receipts.py" "$APP/api/vpnapp.php"
 php -l "$APP/api/vpnapp.php"
 php -l "$APP/scripts/vpnapp_receipt_worker.php"
 install -o root -g www-data -m 0640 "$HERE/vpnapp_receipt_worker.php" "$APP/scripts/vpnapp_receipt_worker.php"
+install -o root -g www-data -m 0640 "$HERE/inspect_vpnapp_receipts.php" "$APP/scripts/inspect_vpnapp_receipts.php"
 for unit in php8.4-fpm php8.3-fpm php8.2-fpm php8.1-fpm; do
   if systemctl is-active --quiet "$unit"; then systemctl reload "$unit"; fi
 done
