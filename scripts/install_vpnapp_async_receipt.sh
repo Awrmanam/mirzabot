@@ -23,6 +23,12 @@ python3 "$HERE/patch_vpnapp_async_receipt.py" "$APP/api/vpnapp.php"
 install -D -o root -g www-data -m 0640     "$HERE/vpnapp_receipt_worker.php" "$APP/scripts/vpnapp_receipt_worker.php"
 php -l "$APP/api/vpnapp.php"
 php -l "$APP/scripts/vpnapp_receipt_worker.php"
+# Reload PHP opcode cache so the signed bridge immediately uses the new queue.
+for unit in php8.4-fpm php8.3-fpm php8.2-fpm php8.1-fpm; do
+  if systemctl is-active --quiet "$unit"; then
+    systemctl reload "$unit"
+  fi
+done
 
 # Do not require a cron daemon; systemd serializes periodic delivery.
 cat > /etc/systemd/system/mirza-vpnapp-receipt.service <<EOF
