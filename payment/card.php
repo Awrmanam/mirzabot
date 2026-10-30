@@ -7,6 +7,7 @@ require_once __DIR__ . '/../Marzban.php';
 require_once __DIR__ . '/../panels.php';
 require_once __DIR__ . '/../function.php';
 require_once __DIR__ . '/../keyboard.php';
+require_once __DIR__ . '/card_auto_match.php';
 $ManagePanel = new ManagePanel();
 require __DIR__ . '/../vendor/autoload.php';
 use Endroid\QrCode\Builder\Builder;
@@ -113,25 +114,49 @@ if(preg_match('/(\d{1,3}(?:,\d{3})*\+)/', $valuepost, $matches)) {
 }}
 
 
-if (is_numeric($amountInteger) && substr($amountInteger, -3) === '000')return;
-if(isset($amountInteger) && $amountInteger !== NULL){
-    $datauser = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM Payment_report WHERE price = '$amountInteger' AND (payment_Status = 'Unpaid' OR payment_Status = 'waiting')"));
-    $order_id = $datauser['id_order'];
-    $Payment_report = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM Payment_report WHERE id_order = '$order_id' LIMIT 1"));
-    if(!isset($Payment_report['price']) || $Payment_report['price'] == null)return;
-    $Balance_id = mysqli_fetch_assoc(mysqli_query($connect, "SELECT * FROM user WHERE id = '{$Payment_report['id_user']}' LIMIT 1"));
-    $textbotlang = languagechange('../text.json');
+// A valid bank deposit for a round plan price (e.g. 500000 tomans)
+// MUST NOT be ignored. The old "ends with 000" guard silently dropped it.
+if (isset($amountInteger) && is_numeric($amountInteger) &&
+    (int)$amountInteger > 0 && (float)$amountInteger == (int)$amountInteger) {
+    $amount=(int)$amountInteger;
+    // Serialize bank SMS webhooks by amount; older duplicate notifications
+    // cannot cause another side effect after payment_Status becomes paid.
+    $lockName='mirza_bank_auto_'.hash('sha256',(string)$amount);
+    $guard=$pdo->prepare("SELECT GET_LOCK(?,5)");
+    $guard->execute([$lockName]);
+    if ((int)$guard->fetchColumn() !== 1) {
+        error_log('[Mirza bank auto] Payment amount is already being checked');
+        return;
+    }
+    try {
+        $Payment_report=mirzaFindUniqueBankCardPayment($pdo,$amount);
+        if (!$Payment_report) return;
+        $order_id=(string)$Payment_report['id_order'];
+        $Balance_id=select('user','*','id',$Payment_report['id_user'],'select');
+        if (!$Balance_id) return;
+        $textbotlang=languagechange('../text.json');
 
-    if ($Payment_report['payment_Status'] == "paid" || $Payment_report['payment_Status'] == "reject") {
-        telegram('answerCallbackQuery', array(
-            'callback_query_id' => $callback_query_id,
-            'text' => $textbotlang['Admin']['Payment']['reviewedpayment'],
-            'show_alert' => true,
-            'cache_time' => 5,
-        ));
-        return;}
-        DirectPayment($order_id,"../images.jpg");
-        update("Payment_report","payment_Status","paid",'id_order',$order_id);
+        // Claim exactly once BEFORE creating the VPN service or charging a
+        // wallet. A second webhook or admin callback sees "paid" and stops.
+        // Bank transfer evidence has already been checked by the inbound
+        // trusted SMS notification handler above.
+        $claim=$pdo->prepare("UPDATE Payment_report
+            SET payment_Status='paid',
+                dec_not_confirmed='تأیید با اعلان تراکنش بانکی'
+            WHERE id_order=? AND payment_Status IN ('waiting','Unpaid')
+              AND Payment_Method='cart to cart'");
+        $claim->execute([$order_id]);
+        if ($claim->rowCount() !== 1) return;
+
+        try {
+            DirectPayment($order_id,"../images.jpg");
+        } catch (Throwable $error) {
+            // Never blindly re-run provisioning or balance credit after an
+            // external-panel exception: operations may be partially complete.
+            error_log('[Mirza bank auto] Claimed payment needs MANUAL provisioning review: '
+                .$error->getMessage());
+            return;
+        }
     $balanceformatsell = number_format(mysqli_fetch_assoc(mysqli_query($connect, "SELECT (Balance) FROM user WHERE id = '{$Payment_report['id_user']}' LIMIT 1"))['Balance'], 0);
     $paymentreports = select("topicid","idreport","report","paymentreport","select")['idreport'];
     $text_report = "یک رسید توسط ربات  تایید شد
@@ -149,6 +174,10 @@ if(isset($amountInteger) && $amountInteger !== NULL){
         'text' => $text_report,
         'parse_mode' => "HTML"
         ]);
+    }
+    } finally {
+        $release=$pdo->prepare("SELECT RELEASE_LOCK(?)");
+        $release->execute([$lockName]);
     }
 }
 }
