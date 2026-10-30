@@ -22,6 +22,8 @@ jobs:
         run: |
           bash -n scripts/install_vpnapp_async_receipt.sh
           bash -n scripts/install_vpnapp_recovery.sh
+          bash -n scripts/install_vpnapp_legacy_live.sh
+          python3 -m py_compile scripts/patch_vpnapp_no_gallery.py scripts/patch_vpnapp_legacy_checkout_sql.py
       - name: Test surgical patchers preserving custom code
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_pending_orders.py' -v
