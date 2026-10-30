@@ -1,7 +1,7 @@
 name: VPN app pending checkout safety
 on:
   push:
-    branches: [fix/vpnapp-multiple-pending-receipts-20261030, fix/vpnapp-admin-snapshot-collations-20261030]
+    branches: [fix/vpnapp-multiple-pending-receipts-20261030, fix/vpnapp-admin-snapshot-collations-20261030, fix/async-receipt-telegram-20261030]
     paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/patch_vpnapp_telegram_receipts.py', 'scripts/tests/**', '.github/workflows/vpnapp-checkout-safety.yml']
   pull_request:
     branches: [feature/vpn-app-store-bridge-20261029, fix/vpnapp-multiple-pending-receipts-20261030, feature/vpnapp-private-receipt-review-20261030]
@@ -15,6 +15,7 @@ jobs:
         run: |
           php -l api/vpnapp.php
           php -l scripts/inspect_vpnapp_orders.php
+          php -l scripts/vpnapp_receipt_worker.php
       - name: Test surgical patchers preserving custom code
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_pending_orders.py' -v
@@ -22,3 +23,4 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_live_safe.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_photo_gallery.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_snapshot_collations.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_async_receipt.py' -v
