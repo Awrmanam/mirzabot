@@ -1,7 +1,7 @@
 name: VPN app pending checkout safety
 on:
   push:
-    branches: [fix/vpnapp-multiple-pending-receipts-20261030, fix/vpnapp-admin-snapshot-collations-20261030, fix/async-receipt-telegram-20261030, fix/reconcile-receipt-pending-20261030, fix/live-legacy-receipt-compat-20261030]
+    branches: [fix/vpnapp-multiple-pending-receipts-20261030, fix/vpnapp-admin-snapshot-collations-20261030, fix/async-receipt-telegram-20261030, fix/reconcile-receipt-pending-20261030, fix/live-legacy-receipt-compat-20261030, fix/restore-card-autoconfirm-clock-20261030]
     paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/patch_vpnapp_telegram_receipts.py', 'scripts/**', '.github/workflows/vpnapp-checkout-safety.yml']
   pull_request:
     branches: [feature/vpn-app-store-bridge-20261029, fix/vpnapp-multiple-pending-receipts-20261030, feature/vpnapp-private-receipt-review-20261030]
@@ -17,6 +17,7 @@ jobs:
           php -l scripts/inspect_vpnapp_orders.php
           php -l scripts/vpnapp_receipt_worker.php
           php -l scripts/inspect_vpnapp_receipts.php
+          php -l scripts/diagnose_card_autoconfirm.php
           python3 -m py_compile scripts/inspect_vpnapp_live_layout.py
       - name: Receipt systemd installer syntax
         run: |
@@ -37,3 +38,4 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_vpnapp_live_layout.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_legacy_checkout_sql.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_no_gallery.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_fix_auto_confirm_clock.py' -v
