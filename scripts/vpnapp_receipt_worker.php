@@ -15,7 +15,7 @@ $now=time();
 $delivered=0;
 try {
     $orders=$pdo->query("SELECT external_id,owner_id,payment_id,result_json
-        FROM vpnapp_orders WHERE status='waiting'
+        FROM vpnapp_orders WHERE status IN ('waiting','fulfilled') AND kind IN ('card','renewal_card')
         ORDER BY updated_at DESC LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orders as $order) {
         if ($delivered>=1) break; // Bound worst-case Telegram retry latency per systemd run.
@@ -51,7 +51,7 @@ try {
             $q=$pdo->prepare("SELECT result_json,status FROM vpnapp_orders
                 WHERE external_id=? AND owner_id=? FOR UPDATE");
             $q->execute([$key,$owner]);$current=$q->fetch(PDO::FETCH_ASSOC);
-            if (!$current || $current['status']!=='waiting') {
+            if (!$current || !in_array($current['status'],['waiting','fulfilled'],true)) {
                 $pdo->rollBack();continue;
             }
             $meta=json_decode((string)($current['result_json']??''),true);
