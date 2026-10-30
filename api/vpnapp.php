@@ -389,6 +389,21 @@ function vpnappNotify($text, $buttonId = null, $photo = null, $paymentId = null)
         curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$fields,
             CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>5,
             CURLOPT_TIMEOUT=>16]);
+        // Optional proxy for Telegram delivery from a restricted Mirza host.
+        // SOCKS5H resolves api.telegram.org remotely through the proxy.
+        $socks=trim((string)getenv('MIRZA_VPNAPP_TELEGRAM_SOCKS5_PROXY'));
+        if ($socks!=='') {
+            $parsed=parse_url($socks);
+            if (!is_array($parsed) || ($parsed['scheme']??'')!=='socks5h' ||
+                empty($parsed['host']) || !isset($parsed['port']) ||
+                (int)$parsed['port']<1 || (int)$parsed['port']>65535 ||
+                isset($parsed['user']) || isset($parsed['pass'])) {
+                curl_close($ch);
+                return [false,0,'invalid Telegram proxy setting'];
+            }
+            curl_setopt($ch,CURLOPT_PROXY,$parsed['host'].':'.$parsed['port']);
+            curl_setopt($ch,CURLOPT_PROXYTYPE,CURLPROXY_SOCKS5_HOSTNAME);
+        }
         $response=curl_exec($ch);
         $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
         $curlError=curl_error($ch);
