@@ -45,7 +45,7 @@ try {
     $q=$pdo->query("SELECT id_invoice FROM Payment_report
         WHERE Payment_Method='cart to cart' AND payment_Status='paid'
           AND id_invoice LIKE 'getconfigafterpay|%'
-        ORDER BY time DESC LIMIT 100");
+        ORDER BY `time` DESC LIMIT 100");
     $service=$pdo->prepare("SELECT Status FROM invoice WHERE username=? LIMIT 1");
     $active=0; $needsReview=0;
     foreach($q->fetchAll(PDO::FETCH_ASSOC) as $payment) {
