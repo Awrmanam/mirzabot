@@ -28,8 +28,8 @@ try {
         $key=(string)$order['external_id'];
         $image=null;
         foreach (['image/jpeg','image/png'] as $mime) {
-            $path=vpnappReceiptFile($key,$mime);
-            if ($path && is_file($path) && !is_link($path)) {
+            $path=vpnappFindReceipt($key,$mime);
+            if ($path) {
                 $image=$path;
                 break;
             }

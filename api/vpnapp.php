@@ -482,27 +482,27 @@ function vpnappNewOrder(PDO $db, $u, $kind, $key) {
     $lock=$db->prepare("SELECT GET_LOCK(?,10)");
     $lock->execute(['vpnapp_account_'.$u['id']]);
     if ((int)$lock->fetchColumn()!==1) vpnappError(409,'Checkout currently busy');
-    // Uncertain wallet/panel operations must be reconciled before another
-    // checkout, so a timeout never accidentally charges the user twice.
-    // A card receipt already submitted for manual review is different:
-    // keeping its review open must not lock all unrelated new purchases.
+    // Preserve payment safety: uncertain wallet charges and actively
+    // processing checkouts require reconciliation. Unpaid card invoices,
+    // missing photos and receipts awaiting review must NOT lock unrelated
+    // new orders. These have no automatic balance deduction.
     $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders WHERE owner_id=?
-        AND (status='unknown' OR
-             (status IN ('processing','awaiting_receipt') AND created_at>?))");
-    $stmt->execute([$u['id'],time()-86400]);
+        AND ((status='unknown' AND kind IN ('wallet','renewal'))
+             OR (status='processing' AND created_at>?))");
+    $stmt->execute([$u['id'],time()-3600]);
     if ((int)$stmt->fetchColumn()>0)
         vpnappError(409,'A previous order needs reconciliation before checkout');
     // Limit unreviewed card receipts and rapid repeat purchases; never
     // approve, delete or mutate any of those existing payment records.
     $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders
-        WHERE owner_id=? AND status='waiting' AND created_at>?");
+        WHERE owner_id=? AND status IN ('waiting','awaiting_receipt') AND created_at>?");
     $stmt->execute([$u['id'],time()-86400]);
-    if ((int)$stmt->fetchColumn()>=3)
-        vpnappError(429,'Too many receipts awaiting review today');
+    if ((int)$stmt->fetchColumn()>=12)
+        vpnappError(429,'Too many card orders pending; contact support to reconcile');
     $stmt=$db->prepare("SELECT COUNT(*) FROM vpnapp_orders
         WHERE owner_id=? AND created_at>?");
     $stmt->execute([$u['id'],time()-86400]);
-    if ((int)$stmt->fetchColumn()>=10)
+    if ((int)$stmt->fetchColumn()>=25)
         vpnappError(429,'Daily checkout limit reached');
     $stmt=$db->prepare("INSERT INTO vpnapp_orders(external_id,owner_id,kind,status,created_at,updated_at) VALUES(?,?,?,?,?,?)");
     $stmt->execute([$key,$u['id'],$kind,'processing',time(),time()]);
@@ -565,6 +565,24 @@ function vpnappReceiptFile($key, $mime) {
     // prevent directory enumeration or public receipt exposure.
     return vpnappPrivateReceiptDir().'/'.hash('sha256',(string)$key).$ext;
 }
+/**
+ * Locate an image saved by either the previous HMAC-based receipt code or the
+ * newer stable naming scheme. This is only used within a private 0700 folder.
+ * Never expose a filesystem path to the API caller.
+ */
+function vpnappFindReceipt($key, $mime) {
+    $preferred=vpnappReceiptFile($key,$mime);
+    if ($preferred && is_file($preferred) && !is_link($preferred)) return $preferred;
+    if (!preg_match('/^[0-9a-f-]{36}$/D',(string)$key)) return null;
+    $ext=$mime==='image/png'?'.png':'.jpg';
+    $secrets=[trim((string)getenv('MIRZA_APP_BRIDGE_SECRET')),''];
+    foreach (array_unique($secrets) as $secret) {
+        $path=vpnappPrivateReceiptDir().'/'.
+            hash_hmac('sha256',(string)$key,$secret).$ext;
+        if (is_file($path) && !is_link($path)) return $path;
+    }
+    return null;
+}
 function vpnappPersistReceipt($key, $data, $mime) {
     $directory=vpnappPrivateReceiptDir();
     if (!is_dir($directory) || !is_writable($directory) || is_link($directory)) {
@@ -585,8 +603,8 @@ function vpnappPersistReceipt($key, $data, $mime) {
     }
 }
 function vpnappPrivateReceiptExists($key) {
-    return is_file((string)vpnappReceiptFile($key,'image/jpeg')) ||
-        is_file((string)vpnappReceiptFile($key,'image/png'));
+    return vpnappFindReceipt($key,'image/jpeg') !== null ||
+        vpnappFindReceipt($key,'image/png') !== null;
 }
 function vpnappAdminReceipt(PDO $db, $key) {
     if (!preg_match('/^[0-9a-f-]{36}$/D',(string)$key))
@@ -596,8 +614,8 @@ function vpnappAdminReceipt(PDO $db, $key) {
     $stmt->execute([$key]);
     if (!$stmt->fetchColumn()) vpnappError(404,'Order not found');
     foreach (['image/jpeg','image/png'] as $mime) {
-        $path=vpnappReceiptFile($key,$mime);
-        if (!$path || !is_file($path) || is_link($path)) continue;
+        $path=vpnappFindReceipt($key,$mime);
+        if (!$path) continue;
         $size=filesize($path);
         if ($size===false || $size<200 || $size>1500000) continue;
         $bytes=file_get_contents($path);
