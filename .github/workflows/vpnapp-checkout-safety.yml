@@ -17,7 +17,9 @@ jobs:
           php -l scripts/inspect_vpnapp_orders.php
           php -l scripts/vpnapp_receipt_worker.php
       - name: Receipt systemd installer syntax
-        run: bash -n scripts/install_vpnapp_async_receipt.sh
+        run: |
+          bash -n scripts/install_vpnapp_async_receipt.sh
+          bash -n scripts/install_vpnapp_recovery.sh
       - name: Test surgical patchers preserving custom code
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_patch_vpnapp_pending_orders.py' -v
