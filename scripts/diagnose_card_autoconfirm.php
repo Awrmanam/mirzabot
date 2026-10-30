@@ -1,9 +1,9 @@
 <?php
 /** Read-only Mirza card auto-confirmation diagnostic. NEVER confirms payments.
- * Run: sudo -u www-data php /tmp/mirza-auto-check/scripts/diagnose_card_autoconfirm.php
+ * Run directly from a GitHub checkout on the actual Mirza server.
  */
 if (PHP_SAPI!=='cli') { http_response_code(403); exit(1); }
-require_once __DIR__.'/../config.php';
+require_once '/var/www/mirzaprobotconfig/config.php';
 if (!isset($pdo) || !($pdo instanceof PDO)) {
     fwrite(STDERR,"ERROR: PDO unavailable".PHP_EOL);exit(2);
 }
