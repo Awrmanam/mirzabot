@@ -780,8 +780,8 @@ function vpnappAdminSnapshot(PDO $db) {
         i.name_product AS plan_name,i.price_product AS amount_toman,
         i.Status AS invoice_status, p.payment_Status AS payment_status
         FROM vpnapp_orders o
-        LEFT JOIN invoice i ON i.id_invoice=o.invoice_id AND i.id_user=o.owner_id
-        LEFT JOIN Payment_report p ON p.id_order=o.payment_id AND p.id_user=o.owner_id
+        LEFT JOIN invoice i ON i.id_invoice COLLATE utf8mb4_unicode_ci = o.invoice_id COLLATE utf8mb4_unicode_ci AND i.id_user=o.owner_id
+        LEFT JOIN Payment_report p ON p.id_order COLLATE utf8mb4_unicode_ci = o.payment_id COLLATE utf8mb4_unicode_ci AND p.id_user=o.owner_id
         ORDER BY o.created_at DESC LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orders as &$entry) {
         // The payment report is the one authoritative state changed by the
