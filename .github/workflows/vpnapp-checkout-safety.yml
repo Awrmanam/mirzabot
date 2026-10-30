@@ -4,7 +4,7 @@ on:
     branches: [fix/vpnapp-multiple-pending-receipts-20261030]
     paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/patch_vpnapp_telegram_receipts.py', 'scripts/tests/**', '.github/workflows/vpnapp-checkout-safety.yml']
   pull_request:
-    branches: [feature/vpn-app-store-bridge-20261029]
+    branches: [feature/vpn-app-store-bridge-20261029, fix/vpnapp-multiple-pending-receipts-20261030]
     paths: ['api/vpnapp.php', 'scripts/patch_vpnapp_pending_orders.py', 'scripts/patch_vpnapp_telegram_receipts.py', 'scripts/tests/**']
 jobs:
   validate:
