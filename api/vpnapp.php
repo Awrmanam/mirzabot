@@ -599,7 +599,6 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
         vpnappError(400,'Unsupported image');
     // Keep an optional encrypted-volume/private-directory copy for the
     // authenticated Iran admin image viewer. Never expose this file by URL.
-    $privateStored=vpnappPersistReceipt($key,$data,$kind);
     // Duplicate image upload is allowed only to retry a failed Telegram
     // notification for the same order. It never changes payment state again.
     $db->beginTransaction();
@@ -625,6 +624,9 @@ function vpnappSubmitReceipt(PDO $db, $u, $key, $encoded) {
     if (!in_array($order['status'],['awaiting_receipt','waiting'],true)) {
         $db->rollBack();vpnappError(409,'Order is not awaiting receipt');
     }
+    // Only after verifying the authenticated owner and an eligible order
+    // can the receipt be written to a private, non-public directory.
+    $privateStored=vpnappPersistReceipt($key,$data,$kind);
     if ($order['status']==='awaiting_receipt') {
         $update=$db->prepare("UPDATE Payment_report
             SET payment_Status='waiting',at_updated=?,dec_not_confirmed='VPN app receipt'
