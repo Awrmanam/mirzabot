@@ -14,7 +14,7 @@ API_SHIM = r'''<?php
 class FakeStatement {
     private $db; private $sql; private $params=[];
     function __construct($db,$sql){$this->db=$db;$this->sql=$sql;}
-    function execute($params=[]){$this->params=$params;return true;}
+    function execute($params=[]){$this->params=$params;if(str_contains($this->sql,'UPDATE'))$this->update();return true;}
     function fetchAll($mode=null){
         if (str_contains($this->sql,'FROM vpnapp_orders')) {
             $items=array_values($this->db->orders);
