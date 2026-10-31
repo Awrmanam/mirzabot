@@ -229,7 +229,7 @@ function vpnappRenewWallet(PDO $db, $u, $key, $username, $panelCode, $planCode, 
              'panel_name'=>$panel['name_panel'],'plan_name'=>$plan['name_product'],
              'amount_toman'=>$price];
     vpnappUpdate($db,$key,'fulfilled',['result'=>$result]);
-    vpnappNotify('✅ تمدید از اپ VPN'. "\n".
+    if (!str_starts_with((string)$u['id'],'web_')) vpnappNotify('✅ تمدید از اپ VPN'. "\n".
         'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
         'سرویس: '.htmlspecialchars($username,ENT_QUOTES,'UTF-8'). "\n".
         'مبلغ: '.number_format($price).' تومان',$u['id']);
