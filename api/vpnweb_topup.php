@@ -123,7 +123,9 @@ function vpnwebTopupReceipt(PDO $db,$u,$id,$encoded) {
         $stmt->execute([$id,$u['id']]);
         $topup=$stmt->fetch(PDO::FETCH_ASSOC);
         if (!$topup) { $db->rollBack(); vpnappError(404,'Unknown top-up'); }
-        if ($topup['state']==='awaiting_manual_review') {
+        if (in_array($topup['state'],['awaiting_manual_review','approved'],true)) {
+            // Acknowledgement may have been lost after durable Mirza storage,
+            // even after an authorized admin approved. Never replace/credit.
             $db->commit();return vpnwebTopupPublic($topup);
         }
         if ($topup['state']!=='awaiting_receipt') {
