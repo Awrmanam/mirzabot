@@ -4,6 +4,9 @@
  *
  * No Telegram API, bank callback, cron/DirectPayment, or external balance.
  * A receipt is only evidence uploaded by the customer, never verification.
+ * The Payment_report row uses a PRIVATE state vpnweb_review_pending,
+ * never legacy Unpaid/waiting, because payment/card.php matches those solely
+ * by amount and could otherwise auto-credit an unrelated incoming bank SMS.
  * Approval requires an authenticated internal administrator who has checked
  * the independent bank statement and supplies the UNIQUE bank transaction ref.
  * No global web routes: call through the already signed vpnapp.php bridge only.
@@ -73,7 +76,7 @@ function vpnwebTopupCreate(PDO $db,$u,$id,$amount) {
         $paymentId=bin2hex(random_bytes(10));
         $db->prepare("INSERT INTO Payment_report
            (id_user,id_order,time,price,payment_Status,Payment_Method,bottype,id_invoice)
-           VALUES (?,?,?,?, 'Unpaid','vpnweb_manual_wallet_topup','vpnweb_manual',NULL)")
+           VALUES (?,?,?,?, 'vpnweb_review_pending','vpnweb_manual_wallet_topup','vpnweb_manual',NULL)")
            ->execute([$u['id'],$paymentId,date('Y/m/d H:i:s'),$amount]);
         $db->prepare("INSERT INTO vpnweb_topups
            (external_id,owner_id,amount_toman,payment_id,card_number,card_holder,state,created_at,updated_at)
@@ -131,8 +134,8 @@ function vpnwebTopupReceipt(PDO $db,$u,$id,$encoded) {
         $db->prepare("UPDATE vpnweb_topups SET state='awaiting_manual_review',
             receipt_mime=?,receipt_sha256=?,updated_at=? WHERE external_id=?")
             ->execute([$mime,hash('sha256',$bytes),time(),$id]);
-        $db->prepare("UPDATE Payment_report SET payment_Status='waiting',at_updated=?
-            WHERE id_order=? AND id_user=? AND payment_Status='Unpaid'
+        $db->prepare("UPDATE Payment_report SET at_updated=?
+            WHERE id_order=? AND id_user=? AND payment_Status='vpnweb_review_pending'
             AND bottype='vpnweb_manual' AND Payment_Method='vpnweb_manual_wallet_topup'")
             ->execute([date('Y-m-d H:i:s'),$topup['payment_id'],$u['id']]);
         $db->commit();
@@ -170,7 +173,7 @@ function vpnwebTopupApprove(PDO $db,$id,$bankReference,$reviewer) {
             throw new RuntimeException('Receipt not awaiting review');
         $payment=$db->prepare("UPDATE Payment_report SET payment_Status='paid',
             dec_not_confirmed='Manually reconciled to bank statement'
-            WHERE id_order=? AND id_user=? AND payment_Status='waiting'
+            WHERE id_order=? AND id_user=? AND payment_Status='vpnweb_review_pending'
             AND Payment_Method='vpnweb_manual_wallet_topup' AND bottype='vpnweb_manual'");
         $payment->execute([$row['payment_id'],$row['owner_id']]);
         if ($payment->rowCount()!==1)
