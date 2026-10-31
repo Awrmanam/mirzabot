@@ -45,13 +45,16 @@ function vpnwebCreateIdentity(PDO $db, $appUserId) {
         $username = 'web_'.substr($appUserId, 0, 12);
         $invite = bin2hex(random_bytes(8));
         $stmt = $db->prepare("INSERT INTO user
-          (id,step,limit_usertest,User_Status,number,Balance,pagenumber,
-           username,agent,message_count,last_message_time,affiliates,
+          (id,step,limit_usertest,roll_Status,username,
+           Processing_value,Processing_value_one,Processing_value_tow,
+           Processing_value_four,User_Status,number,Balance,pagenumber,
+           agent,message_count,last_message_time,affiliates,
            affiliatescount,cardpayment,number_username,namecustom,register,
            verify,codeInvitation,pricediscount,maxbuyagent,joinchannel,
            score,status_cron)
-           VALUES (?, 'none', 1, 'Active', 'none', 0, 1,
-              ?, 'f', '0','0','0','0','0','100','none',?,
+           VALUES (?, 'none', 1, 0, ?,
+              'none','none','none','none','Active','none',0,1,
+              'f','0','0','0','0','0','100','none',?,
               '1',?,'0','0','0',0,'1')");
         $stmt->execute([$commercialId,$username,(string)time(),$invite]);
         $mapping = $db->prepare("INSERT INTO vpnweb_identities
