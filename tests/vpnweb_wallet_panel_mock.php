@@ -187,6 +187,10 @@ $waiting=$db->query("SELECT Payment_Method,bottype,payment_Status FROM Payment_r
 if ($waiting['Payment_Method']!=='vpnweb_manual_wallet_topup' ||
     $waiting['bottype']!=='vpnweb_manual' || $waiting['payment_Status']!=='vpnweb_review_pending')
     throw new RuntimeException('Receipt may be eligible for legacy cron');
+$legacyAutoMatch=$db->query("SELECT COUNT(*) FROM Payment_report
+     WHERE price=125000 AND payment_Status IN ('Unpaid','waiting')")->fetchColumn();
+if ((int)$legacyAutoMatch!==0)
+    throw new RuntimeException('Web manual receipt eligible for amount-only legacy bank matcher');
 if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==$before)
     throw new RuntimeException('Receipt auto-credited without verification');
 $approved=vpnwebTopupApprove($db,$topupId,'STAGING-BANK-0001','test-admin');
