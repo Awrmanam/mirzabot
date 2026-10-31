@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS vpnweb_topups (
 -- Payment_Method='vpnweb_manual_wallet_topup'
 -- bottype='vpnweb_manual'
 -- payment_Status='vpnweb_review_pending' then 'paid' ONLY after manual verification.
--- They cannot satisfy croncard.php's condition Payment_Method IN
+-- They cannot satisfy payment/card.php amount-only match on Unpaid/waiting,
+-- or croncard.php's condition Payment_Method IN
 -- ('cart to cart','arze digital offline') AND bottype IS NULL.
 -- DO NOT delete table or revert owner_id to numeric before reconciling funds.
