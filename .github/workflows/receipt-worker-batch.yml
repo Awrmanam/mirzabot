@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Shell syntax for receipt-only protected installers
+        run: bash -n scripts/deploy_receipt_worker_bounded_safe.sh scripts/tune_receipt_only_timer_safe.sh
       - name: Lint receipt-only worker
         run: php -l scripts/vpnapp_receipt_worker.php
       - name: Verify no bank, payment or cron mutations
