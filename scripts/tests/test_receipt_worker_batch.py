@@ -18,7 +18,7 @@ class FakeStatement {
     function fetchAll($mode=null){
         if (str_contains($this->sql,'FROM vpnapp_orders')) {
             $items=array_values($this->db->orders);
-            usort($items,fn($a,$b)=>$a['updated_at']<=>$b['updated_at']);
+            usort($items,fn($a,$b)=>$b['updated_at']<=>$a['updated_at']);
             return $items;
         }
         return [];
@@ -85,6 +85,7 @@ register_shutdown_function(function(){
 class WorkerBatchTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("php"), "PHP CLI required")
     def test_bounded_paid_and_waiting_with_duplicate_suppression(self):
+        self.assertIn("ORDER BY updated_at DESC LIMIT 2000", WORKER.read_text())
         rows = [self.order("order-"+str(i), i, status="fulfilled" if i==1 else "waiting")
                 for i in range(1, 4)]
         self.run_case(rows, {"payment-1":"paid","payment-2":"waiting","payment-3":"waiting"},
@@ -108,7 +109,7 @@ class WorkerBatchTests(unittest.TestCase):
         return {"external_id":key,"owner_id":str(100+number),
                 "payment_id":"payment-"+str(number),"status":status,
                 "result_json":json.dumps({"receipt_notice_sent":sent} if sent else {}),
-                "updated_at":number,"kind":"card"}
+                "updated_at":100-number,"kind":"card"}
 
     def run_case(self, rows, payments, expected_sent, telegram_fail=False):
         with tempfile.TemporaryDirectory() as tmp:
