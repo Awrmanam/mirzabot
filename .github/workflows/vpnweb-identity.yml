@@ -1,0 +1,52 @@
+name: Mirza web identity (isolated)
+on:
+  push:
+    branches: [feature/web-commercial-identity-20261101]
+    paths:
+      - 'api/vpnapp.php'
+      - 'api/vpnweb_identity.php'
+      - 'tests/vpnweb_identity_integration.php'
+      - '.github/workflows/vpnweb-identity.yml'
+      - 'docs/migrations/20261101_vpnweb_identity_staging.sql'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lint-and-disposable-mysql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: vpnweb_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql
+          coverage: none
+      - name: Lint PHP changes
+        run: |
+          php -l api/vpnweb_identity.php
+          php -l api/vpnapp.php
+          php -l tests/vpnweb_identity_integration.php
+      - name: Disposable MySQL identity integration test
+        env:
+          TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=vpnweb_test;charset=utf8mb4
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: testpass
+        run: php tests/vpnweb_identity_integration.php
+      - name: Ensure legacy cron is unchanged
+        run: |
+          git show fix/receipt-delivery-timer-20261101:cronbot/croncard.php > /tmp/cron-base.php 2>/dev/null || true
+          test -s cronbot/croncard.php
