@@ -890,9 +890,15 @@ try {
             vpnappError(403,'Web account requires explicit commercial identity');
     }
     $u=vpnappUser($pdo,$resolved);
-    if ($action==='account') vpnappReply(200,['ok'=>true,'commercial_id'=>(string)$u['id'],
-        'balance_toman'=>(int)$u['Balance'],'username'=>$u['username'],
-        'agent'=>$u['agent'],'blocked'=>false]);
+    if ($action==='account') {
+        $profile=['ok'=>true,'balance_toman'=>(int)$u['Balance'],
+            'username'=>$u['username'],'agent'=>$u['agent'],'blocked'=>false];
+        if (str_starts_with((string)$u['id'],'web_'))
+            $profile['commercial_id']=(string)$u['id'];
+        else
+            $profile['telegram_id']=(string)$u['id']; // Legacy app compatibility.
+        vpnappReply(200,$profile);
+    }
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
     if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
     if ($action==='capabilities') vpnappReply(200, ['ok'=>true,
