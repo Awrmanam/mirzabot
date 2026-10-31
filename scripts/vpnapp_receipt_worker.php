@@ -30,7 +30,9 @@ try {
         if (!empty($stored['receipt_notice_sent'])) continue;
         $tries=(int)($stored['receipt_send_attempts']??0);
         $last=(int)($stored['receipt_last_attempt_at']??0);
-        if ($tries>=8 || ($last>0 && $now-$last<min(3600,30*(2**min($tries,6))))) continue;
+        // Never abandon a durable receipt permanently after an outage.
+        // Retries are bounded by the existing exponential cooldown (~32 min cap).
+        if ($last>0 && $now-$last<min(3600,30*(2**min($tries,6)))) continue;
         $key=(string)$order['external_id'];
         $image=null;
         foreach (['image/jpeg','image/png'] as $mime) {
@@ -64,7 +66,7 @@ try {
             if (!is_array($meta)) $meta=[];
             $previous=(int)($meta['receipt_send_attempts']??0);
             $previousAt=(int)($meta['receipt_last_attempt_at']??0);
-            if (!empty($meta['receipt_notice_sent']) || $previous>=8 ||
+            if (!empty($meta['receipt_notice_sent']) ||
                 ($previousAt>0 && time()-$previousAt<min(3600,30*(2**min($previous,6))))) {
                 $pdo->rollBack();continue;
             }
