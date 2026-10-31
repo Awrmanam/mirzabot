@@ -8,7 +8,7 @@ dir="$(printenv MIRZA_DIR || true)"
 file="$dir/scripts/vpnapp_receipt_worker.php"
 backup_root=/root/mirza-receipt-worker-backups
 old=38930780513cf3b022cade6f30116b6c6e8c971a550d67332bca1764a426c012
-new=7d28c50a512be8dead9d3a11abf041bb09eefc623732a72f2012b82d7a4eb8ba
+new=d9cd281195c8aba8faada7ead7be884f80cd98d7557c43a026fe76c7135c764a
 url=https://raw.githubusercontent.com/Awrmanam/mirzabot/fix/receipt-worker-bounded-batch-20261101/scripts/vpnapp_receipt_worker.php
 [[ $EUID -eq 0 ]] || { echo "STOP: run as root"; exit 2; }
 [[ -f "$file" ]] || { echo "STOP: worker missing"; exit 3; }
