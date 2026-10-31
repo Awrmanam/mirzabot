@@ -59,7 +59,7 @@ function vpnwebTopupCreate(PDO $db,$u,$id,$amount) {
             if ($existing['owner_id']!==$u['id'] || (int)$existing['amount_toman']!==$amount)
                 throw new RuntimeException('Idempotency key conflict');
             $db->commit();
-            return vpnwebTopupPublic($existing);
+            return vpnwebTopupStatus($db,$u,$id);
         }
         // Protect against repeated pending requests under changing UUIDs.
         $pending=$db->prepare("SELECT COUNT(*) FROM vpnweb_topups WHERE owner_id=?
@@ -175,8 +175,10 @@ function vpnwebTopupApprove(PDO $db,$id,$bankReference,$reviewer) {
         $payment->execute([$row['payment_id'],$row['owner_id']]);
         if ($payment->rowCount()!==1)
             throw new RuntimeException('Payment status changed; no credit granted');
-        $db->prepare('UPDATE user SET Balance=Balance+? WHERE id=? AND User_Status!=?')
-           ->execute([(int)$row['amount_toman'],$row['owner_id'],'block']);
+        $credit=$db->prepare('UPDATE user SET Balance=Balance+? WHERE id=? AND User_Status!=?');
+        $credit->execute([(int)$row['amount_toman'],$row['owner_id'],'block']);
+        if ($credit->rowCount()!==1)
+            throw new RuntimeException('Wallet owner unavailable');
         // bank_reference UNIQUE protects reusing one statement transfer for
         // multiple user accounts or UUIDs. Transaction rollback undoes credit.
         $db->prepare("UPDATE vpnweb_topups SET state='approved',bank_reference=?,
