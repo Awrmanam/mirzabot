@@ -104,6 +104,18 @@ class WorkerBatchTests(unittest.TestCase):
                 self.assertNotIn("receipt_notice_sent", json.loads(row["result_json"]))
                 self.assertEqual(json.loads(row["result_json"])["receipt_send_attempts"], 1)
 
+    @unittest.skipUnless(shutil.which("php"), "PHP CLI required")
+    def test_eighth_failure_does_not_permanently_strand_receipt(self):
+        row = self.order("order-1", 1, status="fulfilled")
+        row["result_json"] = json.dumps({
+            "receipt_send_attempts": 8, "receipt_last_attempt_at": 0
+        })
+        result = self.run_case([row], {"payment-1": "paid"}, expected_sent=1,
+                               verify_default=False)
+        stored = json.loads(result["orders"][0]["result_json"])
+        self.assertEqual(stored["receipt_send_attempts"], 9)
+        self.assertTrue(stored["receipt_notice_sent"])
+
     @staticmethod
     def order(key, number, status="waiting", sent=False):
         return {"external_id":key,"owner_id":str(100+number),
@@ -111,7 +123,7 @@ class WorkerBatchTests(unittest.TestCase):
                 "result_json":json.dumps({"receipt_notice_sent":sent} if sent else {}),
                 "updated_at":100-number,"kind":"card"}
 
-    def run_case(self, rows, payments, expected_sent, telegram_fail=False):
+    def run_case(self, rows, payments, expected_sent, telegram_fail=False, verify_default=True):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             (root/"api").mkdir();(root/"scripts").mkdir()
@@ -132,7 +144,7 @@ class WorkerBatchTests(unittest.TestCase):
             self.assertEqual(completed.returncode,0,completed.stderr)
             result=json.loads(output.read_text())
             self.assertEqual(len(result["sent"]),expected_sent)
-            if not telegram_fail:
+            if not telegram_fail and verify_default:
                 sent={item["external_id"]:json.loads(item["result_json"])
                       for item in result["orders"]}
                 self.assertTrue(sent["order-1"].get("receipt_notice_sent"))
