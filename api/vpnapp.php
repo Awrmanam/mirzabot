@@ -619,7 +619,15 @@ function vpnappAdminReceipt(PDO $db, $key) {
     $stmt=$db->prepare("SELECT external_id FROM vpnapp_orders WHERE external_id=?
         AND kind IN ('card','renewal_card') LIMIT 1");
     $stmt->execute([$key]);
-    if (!$stmt->fetchColumn()) vpnappError(404,'Order not found');
+    $isOrder=(bool)$stmt->fetchColumn();
+    $isWebTopup=false;
+    if (!$isOrder && getenv('MIRZA_VPNWEB_TOPUP_ENABLED')==='1') {
+        $topup=$db->prepare("SELECT 1 FROM vpnweb_topups
+            WHERE external_id=? AND state IN ('awaiting_manual_review','approved','rejected')");
+        $topup->execute([$key]);
+        $isWebTopup=(bool)$topup->fetchColumn();
+    }
+    if (!$isOrder && !$isWebTopup) vpnappError(404,'Order not found');
     foreach (['image/jpeg','image/png'] as $mime) {
         $path=vpnappFindReceipt($key,$mime);
         if (!$path) continue;
