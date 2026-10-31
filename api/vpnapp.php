@@ -7,9 +7,12 @@
  * JSON only. Never expose Mirza's API key, panel credentials or user bearer
  * token to the mobile client. Iran API must verify device ownership first.
  */
-require_once __DIR__ . '/../config.php';
-require_once __DIR__ . '/../function.php';
-require_once __DIR__ . '/../panels.php';
+// Explicit PHP CLI unit-test seam; never settable from an HTTP request.
+if (!defined('MIRZA_VPNAPP_TEST_LIB') || !MIRZA_VPNAPP_TEST_LIB) {
+    require_once __DIR__ . '/../config.php';
+    require_once __DIR__ . '/../function.php';
+    require_once __DIR__ . '/../panels.php';
+}
 require_once __DIR__ . '/vpnweb_identity.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
