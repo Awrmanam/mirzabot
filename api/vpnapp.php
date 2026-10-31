@@ -14,6 +14,7 @@ if (!defined('MIRZA_VPNAPP_TEST_LIB') || !MIRZA_VPNAPP_TEST_LIB) {
     require_once __DIR__ . '/../panels.php';
 }
 require_once __DIR__ . '/vpnweb_identity.php';
+require_once __DIR__ . '/vpnweb_topup.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -876,6 +877,16 @@ try {
             vpnappReply(200,vpnappAdminSnapshot($pdo));
         if ($action==='admin_receipt')
             vpnappReply(200,vpnappAdminReceipt($pdo,(string)($input['order_id']??'')));
+        if ($action==='web_topup_pending') {
+            if (getenv('MIRZA_VPNWEB_MANUAL_APPROVAL_ENABLED')!=='1')
+                vpnappError(503,'Manual review disabled');
+            vpnappReply(200,['ok'=>true]+vpnwebTopupPending($pdo));
+        }
+        if ($action==='web_topup_approve') {
+            vpnappReply(200,['ok'=>true,'topup'=>vpnwebTopupApprove($pdo,
+                (string)($input['topup_id']??''),$input['bank_reference']??null,
+                $input['reviewer']??null)]);
+        }
     }
     // A web account has its own non-Telegram commercial ID, never a fabricated
     // Telegram numeric identifier. Only the signed Iran API supplies this field.
@@ -900,6 +911,14 @@ try {
         vpnappReply(200,$profile);
     }
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
+    // Existing Mirza account and wallet are authoritative. Web top-up uses
+    // its own manual-review record and the existing Payment_report journal.
+    if ($action==='web_topup_create') vpnappReply(200,['ok'=>true,'topup'=>
+        vpnwebTopupCreate($pdo,$u,$input['topup_id']??null,$input['amount_toman']??null)]);
+    if ($action==='web_topup_status') vpnappReply(200,['ok'=>true,'topup'=>
+        vpnwebTopupStatus($pdo,$u,$input['topup_id']??null)]);
+    if ($action==='web_topup_receipt') vpnappReply(200,['ok'=>true,'topup'=>
+        vpnwebTopupReceipt($pdo,$u,$input['topup_id']??null,$input['image_base64']??null)]);
     if ($action==='invoices') vpnappReply(200,['ok'=>true,'items'=>vpnappInvoices($pdo,$u)]);
     if ($action==='capabilities') vpnappReply(200, ['ok'=>true,
         'checkout_enabled'=>vpnappCheckoutAllowed($u)]);
