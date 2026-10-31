@@ -142,3 +142,73 @@ if (ManagePanel::$renewCount!==2)
 if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==0)
     throw new RuntimeException('Unknown renewal charged more than once');
 echo "PASS: actual PHP logic, one wallet debit/create/extension per UUID, timeout requires reconciliation\n";
+// Manual bank recharge uses the SAME Mirza wallet and Payment_report journal,
+// but is never eligible for automatic croncard.php verification.
+$db->exec("CREATE TABLE card_number(cardnumber VARCHAR(16),namecard VARCHAR(100)) ENGINE=InnoDB");
+$db->exec("INSERT INTO card_number VALUES('1234567812345678','TEST BANK HOLDER')");
+$db->exec("CREATE TABLE Payment_report(
+ id INT AUTO_INCREMENT PRIMARY KEY,id_user VARCHAR(200),id_order VARCHAR(200),
+ time VARCHAR(200),at_updated VARCHAR(200),price VARCHAR(200),
+ payment_Status VARCHAR(100),Payment_Method VARCHAR(400),bottype VARCHAR(300),
+ id_invoice VARCHAR(1000),dec_not_confirmed TEXT) ENGINE=InnoDB");
+$db->exec("CREATE TABLE vpnweb_topups(
+ external_id VARCHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+ owner_id VARCHAR(64) NOT NULL,amount_toman INT NOT NULL,
+ payment_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+ card_number VARCHAR(16) NOT NULL,card_holder VARCHAR(200) NOT NULL,
+ state VARCHAR(32) NOT NULL,receipt_mime VARCHAR(32),receipt_sha256 CHAR(64),
+ bank_reference VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NULL UNIQUE,
+ approved_by VARCHAR(64),created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL,
+ INDEX idx_owner(owner_id,created_at)) ENGINE=InnoDB");
+putenv('MIRZA_VPNWEB_TOPUP_ENABLED=1');
+putenv('MIRZA_VPNWEB_MANUAL_APPROVAL_ENABLED=1');
+$dir=vpnappPrivateReceiptDir();
+if (!is_dir($dir)) mkdir($dir,0700,true);
+chmod($dir,0700);
+$topupId='55555555-5555-4555-8555-555555555555';
+$topup=vpnwebTopupCreate($db,$u,$topupId,125000);
+$replayed=vpnwebTopupCreate($db,$u,$topupId,125000);
+if ($replayed['status']!=='awaiting_receipt' ||
+    (int)$db->query('SELECT COUNT(*) FROM Payment_report')->fetchColumn()!==1)
+    throw new RuntimeException('Repeated topup created duplicate payment');
+$before=(int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn();
+$img=imagecreatetruecolor(180,110);
+for($i=0;$i<700;$i++) {
+    $color=imagecolorallocate($img,random_int(0,255),random_int(0,255),random_int(0,255));
+    imagesetpixel($img,random_int(0,179),random_int(0,109),$color);
+}
+ob_start(); imagepng($img);$bytes=ob_get_clean();imagedestroy($img);
+$uploaded=vpnwebTopupReceipt($db,$u,$topupId,base64_encode($bytes));
+if ($uploaded['status']!=='awaiting_manual_review')
+    throw new RuntimeException('Topup receipt not persisted');
+if (vpnwebTopupStatus($db,$u,$topupId)['status']!=='awaiting_manual_review')
+    throw new RuntimeException('Topup read mismatch');
+$waiting=$db->query("SELECT Payment_Method,bottype,payment_Status FROM Payment_report")->fetch(PDO::FETCH_ASSOC);
+if ($waiting['Payment_Method']!=='vpnweb_manual_wallet_topup' ||
+    $waiting['bottype']!=='vpnweb_manual' || $waiting['payment_Status']!=='waiting')
+    throw new RuntimeException('Receipt may be eligible for legacy cron');
+if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==$before)
+    throw new RuntimeException('Receipt auto-credited without verification');
+$approved=vpnwebTopupApprove($db,$topupId,'STAGING-BANK-0001','test-admin');
+$duplicate=vpnwebTopupApprove($db,$topupId,'STAGING-BANK-0001','test-admin');
+if ($approved['status']!=='approved'||$duplicate['status']!=='approved')
+    throw new RuntimeException('Manual approval failed');
+if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==$before+125000)
+    throw new RuntimeException('Manual approval not exactly-once credit');
+$secondId='66666666-6666-4666-8666-666666666666';
+vpnwebTopupCreate($db,$u,$secondId,125000);
+vpnwebTopupReceipt($db,$u,$secondId,base64_encode($bytes));
+try {
+    vpnwebTopupApprove($db,$secondId,'STAGING-BANK-0001','test-admin');
+    throw new LogicException('Duplicate bank reference accepted');
+} catch(RuntimeException $exc) {
+    if($exc->getCode()!==409) throw $exc;
+}
+if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==$before+125000)
+    throw new RuntimeException('Reused bank reference generated duplicate credit');
+foreach ([$topupId,$secondId] as $id) {
+    foreach (['.png','.jpg'] as $ext)
+        @unlink($dir.'/'.hash('sha256',$id).$ext);
+}
+echo "PASS: manual bank receipt persisted, cron excluded, unique bank ref, one wallet credit\n";
+
