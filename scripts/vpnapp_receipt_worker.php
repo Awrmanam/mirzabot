@@ -85,8 +85,13 @@ try {
             'پیگیری: '.htmlspecialchars($payment,ENT_QUOTES,'UTF-8')."\n".
             'وضعیت: '.($paymentStatus==='paid'?'پرداخت قبلاً تأیید شده':'در انتظار بررسی');
         // Never show a stale payment-approval button for an already paid order.
+        $sendStarted=microtime(true);
         $sent=vpnappNotify($message,$owner,$image,
             $paymentStatus==='waiting'?$payment:null);
+        // Keep sender IDs, images and payment references out of timing logs.
+        error_log('[vpnapp receipt] result='.($sent?'delivered':'retry').
+            ' tag='.substr(hash('sha256',$key),0,12).
+            ' elapsed_ms='.(int)round((microtime(true)-$sendStarted)*1000));
         if ($sent) {
             $pdo->beginTransaction();
             try {
