@@ -6,6 +6,7 @@ on:
       - 'api/vpnapp.php'
       - 'api/vpnweb_identity.php'
       - 'tests/vpnweb_identity_integration.php'
+      - 'tests/vpnweb_wallet_panel_mock.php'
       - '.github/workflows/vpnweb-identity.yml'
       - 'docs/migrations/20261101_vpnweb_identity_staging.sql'
   workflow_dispatch:
@@ -40,12 +41,19 @@ jobs:
           php -l api/vpnweb_identity.php
           php -l api/vpnapp.php
           php -l tests/vpnweb_identity_integration.php
+          php -l tests/vpnweb_wallet_panel_mock.php
       - name: Disposable MySQL identity integration test
         env:
           TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=vpnweb_test;charset=utf8mb4
           TEST_MYSQL_USER: root
           TEST_MYSQL_PASSWORD: testpass
         run: php tests/vpnweb_identity_integration.php
+      - name: Real wallet/renewal PHP logic with mocked panel
+        env:
+          TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=vpnweb_test;charset=utf8mb4
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASSWORD: testpass
+        run: php tests/vpnweb_wallet_panel_mock.php
       - name: Ensure legacy cron is unchanged
         run: |
           git show fix/receipt-delivery-timer-20261101:cronbot/croncard.php > /tmp/cron-base.php 2>/dev/null || true
