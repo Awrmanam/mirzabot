@@ -21,7 +21,7 @@ $attempted=0;
 try {
     $orders=$pdo->query("SELECT external_id,owner_id,payment_id,result_json
         FROM vpnapp_orders WHERE status IN ('waiting','fulfilled') AND kind IN ('card','renewal_card')
-        ORDER BY updated_at ASC LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC);
+        ORDER BY updated_at DESC LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orders as $order) {
         if ($attempted >= $maxAttemptsPerRun ||
             microtime(true)-$runStartedAt >= $maxRuntimeSeconds) break;
