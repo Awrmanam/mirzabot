@@ -10,6 +10,7 @@
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../function.php';
 require_once __DIR__ . '/../panels.php';
+require_once __DIR__ . '/vpnweb_identity.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -25,7 +26,7 @@ function vpnappSetup(PDO $db) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $db->exec("CREATE TABLE IF NOT EXISTS vpnapp_orders (
         external_id VARCHAR(64) PRIMARY KEY,
-        owner_id BIGINT NOT NULL, kind VARCHAR(16) NOT NULL,
+        owner_id VARCHAR(64) NOT NULL, kind VARCHAR(16) NOT NULL,
         status VARCHAR(24) NOT NULL, payment_id VARCHAR(32) NULL,
         invoice_id VARCHAR(32) NULL, result_json TEXT NULL,
         created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
@@ -57,7 +58,9 @@ function vpnappCheckoutAllowed($u) {
     return in_array((string)$u['id'],$allowed,true);
 }
 function vpnappUser(PDO $db, $id) {
-    if (!is_string($id) || !preg_match('/^[1-9][0-9]{0,19}$/D',$id)) vpnappError(400,'Invalid account');
+    if (!is_string($id) || (!preg_match('/^[1-9][0-9]{0,19}$/D',$id)
+        && !preg_match('/^web_[a-f0-9]{32}$/D',$id)))
+        vpnappError(400,'Invalid account');
     $stmt=$db->prepare("SELECT id,username,agent,Balance,User_Status,pricediscount,namecustom,
                         number_username,affiliates FROM user WHERE id=? LIMIT 1");
     $stmt->execute([$id]); $u=$stmt->fetch(PDO::FETCH_ASSOC);
@@ -788,7 +791,7 @@ function vpnappWalletPurchase(PDO $db, $u, $panel, $plan, $key) {
         $result['subscription_url']=$output['subscription_url'];
     }
     vpnappUpdate($db,$key,'fulfilled',['invoice_id'=>$id,'result'=>$result]);
-    vpnappNotify('✅ خرید با کیف پول از اپ VPN'. "\n".
+    if (!str_starts_with((string)$u['id'],'web_')) vpnappNotify('✅ خرید با کیف پول از اپ VPN'. "\n".
         'کاربر: '.htmlspecialchars($u['id'],ENT_QUOTES,'UTF-8'). "\n".
         'پلن: '.htmlspecialchars($plan['name_product'],ENT_QUOTES,'UTF-8'). "\n".
         'سرویس: '.htmlspecialchars($username,ENT_QUOTES,'UTF-8'). "\n".
@@ -858,13 +861,33 @@ try {
     // This action is available only to a holder of the server-side HMAC key.
     // No public/customer HTTP endpoint exposes it; it cannot mutate funds.
     if ((string)($input['telegram_id']??'')==='0') {
+        if ($action==='web_identity_create') {
+            vpnappReply(200, ['ok'=>true, 'identity'=>vpnwebCreateIdentity(
+                $pdo, $input['app_user_id']??null)]);
+        }
+        if ($action==='public_catalog') {
+            $public = vpnappCatalog($pdo, ['agent'=>'f','pricediscount'=>0]);
+            vpnappReply(200, ['ok'=>true,'items'=>$public,'price_type'=>'public_base']);
+        }
         if ($action==='admin_snapshot')
             vpnappReply(200,vpnappAdminSnapshot($pdo));
         if ($action==='admin_receipt')
             vpnappReply(200,vpnappAdminReceipt($pdo,(string)($input['order_id']??'')));
     }
-    $u=vpnappUser($pdo,(string)($input['telegram_id']??''));
-    if ($action==='account') vpnappReply(200,['ok'=>true,'telegram_id'=>(string)$u['id'],
+    // A web account has its own non-Telegram commercial ID, never a fabricated
+    // Telegram numeric identifier. Only the signed Iran API supplies this field.
+    $webId=$input['commercial_id']??null;
+    if ($webId !== null && $webId !== '') {
+        if ((string)($input['telegram_id']??'') !== '0')
+            vpnappError(403,'Ambiguous identities');
+        $resolved=vpnwebResolveIdentity($pdo,$webId);
+    } else {
+        $resolved=(string)($input['telegram_id']??'');
+        if (str_starts_with($resolved, 'web_'))
+            vpnappError(403,'Web account requires explicit commercial identity');
+    }
+    $u=vpnappUser($pdo,$resolved);
+    if ($action==='account') vpnappReply(200,['ok'=>true,'commercial_id'=>(string)$u['id'],
         'balance_toman'=>(int)$u['Balance'],'username'=>$u['username'],
         'agent'=>$u['agent'],'blocked'=>false]);
     if ($action==='catalog') vpnappReply(200,['ok'=>true,'items'=>vpnappCatalog($pdo,$u)]);
@@ -876,12 +899,16 @@ try {
     if ($action==='order_status') vpnappReply(200,['ok'=>true,
         'order'=>vpnappReceiptInfo($pdo,$u,(string)($input['order_id']??''))]);
     if ($action==='receipt') {
+        if (str_starts_with((string)$u['id'],'web_'))
+            vpnappError(503,'Bank transfer is not approved for independent web accounts');
         if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         vpnappReply(200,['ok'=>true,'receipt'=>vpnappSubmitReceipt($pdo,$u,
             (string)($input['order_id']??''),$input['image_base64']??'')]);
     }
     if ($action==='renew_card') {
+        if (str_starts_with((string)$u['id'],'web_'))
+            vpnappError(503,'Manual bank transfer is disabled for web customers');
         if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         $key=(string)($input['order_id']??'');
@@ -909,6 +936,9 @@ try {
         vpnappReply(200,['ok'=>true,'order'=>$result]);
     }
     if ($action==='checkout') {
+        if (str_starts_with((string)$u['id'],'web_')
+            && ($input['method']??'card') !== 'wallet')
+            vpnappError(503,'Only verified wallet checkout is permitted for web accounts');
         if (!vpnappCheckoutAllowed($u))
             vpnappError(403,'Checkout disabled');
         $key=(string)($input['order_id']??'');
