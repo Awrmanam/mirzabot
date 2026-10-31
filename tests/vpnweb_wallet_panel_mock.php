@@ -185,7 +185,7 @@ if (vpnwebTopupStatus($db,$u,$topupId)['status']!=='awaiting_manual_review')
     throw new RuntimeException('Topup read mismatch');
 $waiting=$db->query("SELECT Payment_Method,bottype,payment_Status FROM Payment_report")->fetch(PDO::FETCH_ASSOC);
 if ($waiting['Payment_Method']!=='vpnweb_manual_wallet_topup' ||
-    $waiting['bottype']!=='vpnweb_manual' || $waiting['payment_Status']!=='waiting')
+    $waiting['bottype']!=='vpnweb_manual' || $waiting['payment_Status']!=='vpnweb_review_pending')
     throw new RuntimeException('Receipt may be eligible for legacy cron');
 if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==$before)
     throw new RuntimeException('Receipt auto-credited without verification');
