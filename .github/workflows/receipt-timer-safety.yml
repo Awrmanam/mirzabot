@@ -1,0 +1,26 @@
+name: Mirza receipt-only timer safety
+
+on:
+  push:
+    branches:
+      - fix/receipt-delivery-timer-20261101
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer syntax
+        run: bash -n scripts/speedup_vpnapp_receipt_timer.sh
+      - name: Receipt notification timer only
+        run: |
+          grep -q 'OnUnitInactiveSec=10s' scripts/speedup_vpnapp_receipt_timer.sh
+          grep -q 'SAFE_TIMER_MATCH' scripts/speedup_vpnapp_receipt_timer.sh
+          if grep -Eq 'croncard.php|systemctl restart mirza.service|UPDATE Payment_report' scripts/speedup_vpnapp_receipt_timer.sh; then
+            echo "Unexpected payment or service mutation" >&2
+            exit 1
+          fi
