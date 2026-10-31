@@ -8,7 +8,7 @@ override=/etc/systemd/system/mirza-vpnapp-receipt.timer.d/fast-receipts.conf
 dir="$(printenv MIRZA_DIR || true)"
 [[ -n "$dir" ]] || dir=/var/www/mirzaprobotconfig
 worker="$dir/scripts/vpnapp_receipt_worker.php"
-new=4e097cdaac5fb8a704f4edc15b9dbb0b850140bfc5d61dacfa3113e9fcd008fb
+new=7d28c50a512be8dead9d3a11abf041bb09eefc623732a72f2012b82d7a4eb8ba
 [[ $EUID -eq 0 ]] || { echo "STOP: root required"; exit 2; }
 [[ -f "$worker" && "$(sha256sum "$worker" | awk '{print $1}')" == "$new" ]] || { echo "STOP: install vetted worker first"; exit 3; }
 systemctl is-active "$name" >/dev/null || { echo "STOP: timer inactive"; exit 3; }
