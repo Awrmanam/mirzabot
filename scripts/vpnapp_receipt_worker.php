@@ -12,19 +12,27 @@ $lockPath=sys_get_temp_dir().'/mirza-vpnapp-receipt-delivery.lock';
 $lock=fopen($lockPath,'c');
 if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) { exit(0); }
 $now=time();
-$delivered=0;
+$runStartedAt=microtime(true);
+// Bound queue throughput and execution time without introducing a second worker.
+// The existing flock remains the sole same-host concurrency gate.
+$maxAttemptsPerRun=2;
+$maxRuntimeSeconds=20.0;
+$attempted=0;
 try {
     $orders=$pdo->query("SELECT external_id,owner_id,payment_id,result_json
         FROM vpnapp_orders WHERE status IN ('waiting','fulfilled') AND kind IN ('card','renewal_card')
         ORDER BY updated_at DESC LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($orders as $order) {
-        if ($delivered>=1) break; // Bound worst-case Telegram retry latency per systemd run.
+        if ($attempted >= $maxAttemptsPerRun ||
+            microtime(true)-$runStartedAt >= $maxRuntimeSeconds) break;
         $stored=json_decode((string)($order['result_json']??''),true);
         if (!is_array($stored)) $stored=[];
         if (!empty($stored['receipt_notice_sent'])) continue;
         $tries=(int)($stored['receipt_send_attempts']??0);
         $last=(int)($stored['receipt_last_attempt_at']??0);
-        if ($tries>=8 || ($last>0 && $now-$last<min(3600,30*(2**min($tries,6))))) continue;
+        // Never abandon a durable receipt permanently after an outage.
+        // Retries are bounded by the existing exponential cooldown (~32 min cap).
+        if ($last>0 && $now-$last<min(3600,30*(2**min($tries,6)))) continue;
         $key=(string)$order['external_id'];
         $image=null;
         foreach (['image/jpeg','image/png'] as $mime) {
@@ -58,7 +66,7 @@ try {
             if (!is_array($meta)) $meta=[];
             $previous=(int)($meta['receipt_send_attempts']??0);
             $previousAt=(int)($meta['receipt_last_attempt_at']??0);
-            if (!empty($meta['receipt_notice_sent']) || $previous>=8 ||
+            if (!empty($meta['receipt_notice_sent']) ||
                 ($previousAt>0 && time()-$previousAt<min(3600,30*(2**min($previous,6))))) {
                 $pdo->rollBack();continue;
             }
@@ -72,32 +80,47 @@ try {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
-        $delivered++;
+        // Count an actual send attempt only after claiming it in the same DB.
+        $attempted++;
         $message='🧾 رسید کارت‌به‌کارت از اپ VPN'."\n".
             'کاربر: '.htmlspecialchars($owner,ENT_QUOTES,'UTF-8')."\n".
             'پیگیری: '.htmlspecialchars($payment,ENT_QUOTES,'UTF-8')."\n".
             'وضعیت: '.($paymentStatus==='paid'?'پرداخت قبلاً تأیید شده':'در انتظار بررسی');
         // Never show a stale payment-approval button for an already paid order.
+        $sendStarted=microtime(true);
         $sent=vpnappNotify($message,$owner,$image,
             $paymentStatus==='waiting'?$payment:null);
-        if ($sent) {
-            $pdo->beginTransaction();
-            try {
-                $q=$pdo->prepare("SELECT result_json FROM vpnapp_orders
-                    WHERE external_id=? AND owner_id=? FOR UPDATE");
-                $q->execute([$key,$owner]);$meta=json_decode((string)$q->fetchColumn(),true);
-                if (!is_array($meta)) $meta=[];
+        // Keep sender IDs, images and payment references out of timing logs.
+        error_log('[vpnapp receipt] result='.($sent?'delivered':'retry').
+            ' tag='.substr(hash('sha256',$key),0,12).
+            ' elapsed_ms='.(int)round((microtime(true)-$sendStarted)*1000));
+        // A false result from the legacy notifier can be a definitive error
+        // OR a Telegram reply lost after acceptance. Never label it "failed".
+        // Keep this notice outcome separate from payment and invoice status.
+        $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare("SELECT result_json FROM vpnapp_orders
+                WHERE external_id=? AND owner_id=? FOR UPDATE");
+            $q->execute([$key,$owner]);$meta=json_decode((string)$q->fetchColumn(),true);
+            if (!is_array($meta)) $meta=[];
+            if ($sent) {
                 $meta['receipt_notice_sent']=true;
-                $pdo->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
-                    WHERE external_id=? AND owner_id=?")->execute([
-                    json_encode($meta,JSON_UNESCAPED_UNICODE),time(),$key,$owner]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
-                throw $e;
+                $meta['receipt_telegram_outcome']='delivered';
+            } else {
+                // Unknown, not proven undelivered. The retry is best-effort;
+                // without Telegram message_id a duplicate remains possible.
+                $meta['receipt_telegram_outcome']='unconfirmed';
             }
-        } else {
-            error_log('[vpnapp] queued receipt Telegram delivery failed; will retry: '.$key);
+            $pdo->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
+                WHERE external_id=? AND owner_id=?")->execute([
+                json_encode($meta,JSON_UNESCAPED_UNICODE),time(),$key,$owner]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        if (!$sent) {
+            error_log('[vpnapp] queued receipt Telegram delivery unconfirmed; retry tag='.substr(hash('sha256',$key),0,12));
         }
     }
 } catch (Throwable $e) {

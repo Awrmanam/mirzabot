@@ -1,0 +1,23 @@
+name: Bounded receipt delivery without payment changes
+on:
+  push:
+    branches:
+      - fix/receipt-worker-bounded-batch-20261101
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax for receipt-only protected installers
+        run: bash -n scripts/deploy_receipt_worker_bounded_safe.sh scripts/tune_receipt_only_timer_safe.sh
+      - name: Lint receipt-only worker
+        run: php -l scripts/vpnapp_receipt_worker.php
+      - name: Verify no bank, payment or cron mutations
+        run: |
+          grep -Fq "['waiting','paid']" scripts/vpnapp_receipt_worker.php
+          ! grep -Ei 'UPDATE Payment_report|INSERT INTO Payment_report|DirectPayment\(' scripts/vpnapp_receipt_worker.php
+      - name: Run fake database and Telegram worker scenarios
+        run: python3 -m unittest discover -s scripts/tests -p test_receipt_worker_batch.py -v
