@@ -103,6 +103,7 @@ class WorkerBatchTests(unittest.TestCase):
             else:
                 self.assertNotIn("receipt_notice_sent", json.loads(row["result_json"]))
                 self.assertEqual(json.loads(row["result_json"])["receipt_send_attempts"], 1)
+                self.assertEqual(json.loads(row["result_json"])["receipt_telegram_outcome"], "unconfirmed")
 
     @unittest.skipUnless(shutil.which("php"), "PHP CLI required")
     def test_eighth_failure_does_not_permanently_strand_receipt(self):
@@ -115,6 +116,7 @@ class WorkerBatchTests(unittest.TestCase):
         stored = json.loads(result["orders"][0]["result_json"])
         self.assertEqual(stored["receipt_send_attempts"], 9)
         self.assertTrue(stored["receipt_notice_sent"])
+        self.assertEqual(stored["receipt_telegram_outcome"], "delivered")
 
     @staticmethod
     def order(key, number, status="waiting", sent=False):
