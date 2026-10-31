@@ -94,24 +94,33 @@ try {
         error_log('[vpnapp receipt] result='.($sent?'delivered':'retry').
             ' tag='.substr(hash('sha256',$key),0,12).
             ' elapsed_ms='.(int)round((microtime(true)-$sendStarted)*1000));
-        if ($sent) {
-            $pdo->beginTransaction();
-            try {
-                $q=$pdo->prepare("SELECT result_json FROM vpnapp_orders
-                    WHERE external_id=? AND owner_id=? FOR UPDATE");
-                $q->execute([$key,$owner]);$meta=json_decode((string)$q->fetchColumn(),true);
-                if (!is_array($meta)) $meta=[];
+        // A false result from the legacy notifier can be a definitive error
+        // OR a Telegram reply lost after acceptance. Never label it "failed".
+        // Keep this notice outcome separate from payment and invoice status.
+        $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare("SELECT result_json FROM vpnapp_orders
+                WHERE external_id=? AND owner_id=? FOR UPDATE");
+            $q->execute([$key,$owner]);$meta=json_decode((string)$q->fetchColumn(),true);
+            if (!is_array($meta)) $meta=[];
+            if ($sent) {
                 $meta['receipt_notice_sent']=true;
-                $pdo->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
-                    WHERE external_id=? AND owner_id=?")->execute([
-                    json_encode($meta,JSON_UNESCAPED_UNICODE),time(),$key,$owner]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) $pdo->rollBack();
-                throw $e;
+                $meta['receipt_telegram_outcome']='delivered';
+            } else {
+                // Unknown, not proven undelivered. The retry is best-effort;
+                // without Telegram message_id a duplicate remains possible.
+                $meta['receipt_telegram_outcome']='unconfirmed';
             }
-        } else {
-            error_log('[vpnapp] queued receipt Telegram delivery failed; will retry tag='.substr(hash('sha256',$key),0,12));
+            $pdo->prepare("UPDATE vpnapp_orders SET result_json=?,updated_at=?
+                WHERE external_id=? AND owner_id=?")->execute([
+                json_encode($meta,JSON_UNESCAPED_UNICODE),time(),$key,$owner]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        if (!$sent) {
+            error_log('[vpnapp] queued receipt Telegram delivery unconfirmed; retry tag='.substr(hash('sha256',$key),0,12));
         }
     }
 } catch (Throwable $e) {
