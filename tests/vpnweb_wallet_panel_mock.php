@@ -12,12 +12,17 @@ function generateUsername($fromId,$method,$username,$suffix,$text,$name,$custom)
 class ManagePanel {
     public static int $createCount=0;
     public static int $renewCount=0;
+    public static bool $timeoutOnCreate=false;
+    public static bool $timeoutOnRenew=false;
     public function createUser($panel,$plan,$username,$options) {
         self::$createCount++;
+        // Mock an ambiguous outcome AFTER the remote panel may have succeeded.
+        if (self::$timeoutOnCreate) throw new RuntimeException('simulated timeout after create');
         return ['username'=>$username,'subscription_url'=>'https://staging.example.invalid/sub/test'];
     }
     public function extend($method,$volume,$days,$username,$plan,$panelCode) {
         self::$renewCount++;
+        if (self::$timeoutOnRenew) throw new RuntimeException('simulated timeout after extend');
         return ['status'=>'success'];
     }
 }
@@ -112,4 +117,28 @@ if ((int)$db->query('SELECT COUNT(*) FROM invoice')->fetchColumn()!==1)
     throw new RuntimeException('Unexpected extra service invoice');
 if ((int)$db->query('SELECT COUNT(*) FROM vpnapp_orders')->fetchColumn()!==2)
     throw new RuntimeException('Duplicate order records');
-echo "PASS: real PHP Mirza checkout/renew functions, mocked panel; one debit, one create, one extend\n";
+// Ambiguous panel timeout MUST keep the original order id, not repeat a debit
+// or repeat createUser. This is reconciliation required, NOT fulfilled.
+ManagePanel::$timeoutOnCreate = true;
+$unknownId='33333333-3333-4333-8333-333333333333';
+$unknownOne=$checkout($unknownId);
+$unknownTwo=$checkout($unknownId);
+if (($unknownOne['status']??'')!=='unknown' || $unknownOne!==$unknownTwo)
+    throw new RuntimeException('Unknown operation should remain pending review');
+if (ManagePanel::$createCount!==2)
+    throw new RuntimeException('Blind retry after ambiguous create');
+if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==100000)
+    throw new RuntimeException('Unknown operation charged more than once');
+ManagePanel::$timeoutOnCreate = false;
+
+ManagePanel::$timeoutOnRenew = true;
+$unknownRenew='44444444-4444-4444-8444-444444444444';
+$renewOne=$renew($unknownRenew);
+$renewTwo=$renew($unknownRenew);
+if (($renewOne['status']??'')!=='unknown'||$renewOne!==$renewTwo)
+    throw new RuntimeException('Unknown renewal was retried');
+if (ManagePanel::$renewCount!==2)
+    throw new RuntimeException('Blind retry after renewal timeout');
+if ((int)$db->query("SELECT Balance FROM user WHERE id='".$commercial."'")->fetchColumn()!==0)
+    throw new RuntimeException('Unknown renewal charged more than once');
+echo "PASS: actual PHP logic, one wallet debit/create/extension per UUID, timeout requires reconciliation\n";
