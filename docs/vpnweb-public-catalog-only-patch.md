@@ -19,7 +19,9 @@ The destination file MUST be absent before first installation.
 
 Requirements: PHP 8+, PDO MySQL, MySQL read privileges for product
 and marzban_panel only. The new script imports ONLY the existing
-config.php for its PDO connection, and performs SELECT/SHOW queries.
+config.php for its PDO connection and uses an explicit MySQL
+SET TRANSACTION READ ONLY followed by a SELECT/SHOW-only transaction.
+Any accidental SQL mutation inside that transaction must fail.
 It does not call Telegram, create orders, generate panel users or update
 the Mirza schema.
 
@@ -70,6 +72,7 @@ and scope=public. Never expose arbitrary product columns or row SELECT *.
 In an isolated PHP environment:
 php -l api/vpnweb_public_catalog.php
 php tests/vpnweb_public_catalog_security.php
+php tests/vpnweb_public_catalog_fixture.php
 
 The MySQL regression test requires an **independent disposable staging
 database**, with APP_ENV=staging and MIRZA_STAGING_PANEL_MOCK=1:
@@ -78,7 +81,9 @@ php tests/vpnweb_public_catalog_mysql.php
 That test opens a transaction, inserts synthetic rows covering active,
 hidden, reseller-only, inactive panel and Manualsale cases, verifies
 public base prices and outputs, and ALWAYS rolls back. Never execute this
-test on a production database.
+test on a production database. The separate fixture PDO unit test
+needs NO MySQL connection and asserts readable names/categories and
+the output field allowlist.
 
 Without a catalog key, the endpoint returns 403; without the explicit
 enable flag, it returns 503; any non-GET method returns 403.
