@@ -16,8 +16,17 @@ function vpnwebCatalogReply(int $code, array $payload): void {
     echo json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
 }
+// Optional file-mode activation avoids changing live Apache/FPM service
+// configuration. Only a root-owned marker + independent key enable it.
+function vpnwebCatalogEnabled(): bool {
+    $explicit=getenv('MIRZA_PUBLIC_CATALOG_ENABLED');
+    if ($explicit!==false) return $explicit==='1';
+    return is_file('/etc/mirza-public-catalog/enabled');
+}
 function vpnwebCatalogSecret(): string {
     $file=trim((string)(getenv('MIRZA_PUBLIC_CATALOG_SECRET_FILE')?:''));
+    if ($file==='' && is_file('/etc/mirza-public-catalog/secret'))
+        $file='/etc/mirza-public-catalog/secret';
     if ($file!=='') {
         $real=realpath($file);
         $root=realpath((string)($_SERVER['DOCUMENT_ROOT']??''));
@@ -111,7 +120,7 @@ function vpnwebCatalogRows(PDO $pdo): array {
 
 // CLI-only library seam; impossible to set through ordinary HTTP headers/URL.
 if(defined('VPNWEB_PUBLIC_CATALOG_LIB_ONLY')&&VPNWEB_PUBLIC_CATALOG_LIB_ONLY)return;
-if(getenv('MIRZA_PUBLIC_CATALOG_ENABLED')!=='1')
+if(!vpnwebCatalogEnabled())
     vpnwebCatalogReply(503,['error'=>'Catalog disabled']);
 $secret=vpnwebCatalogSecret();
 if(!vpnwebCatalogAuthenticated($_SERVER['REQUEST_METHOD']??'',
