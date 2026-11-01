@@ -21,6 +21,9 @@ check(!vpnwebCatalogEnabledProduct(['status'=>'disable'],'status'),'disabled pro
 check(vpnwebCatalogEnabledProduct(['status'=>'active'],'status'),'enabled product public');
 check(!vpnwebCatalogEnabledProduct(['is_active'=>'0'],'is_active'),'is_active false hidden');
 check(vpnwebCatalogLabel('تست فارسی',4)==='تست ','unicode truncation');
+check(vpnwebCatalogLabel('ProMax',200)==='ProMax','public title remains visible');
+check(vpnwebCatalogLabel('Lite',80)==='Lite','public category remains visible');
+check(vpnwebCatalogLabel('🇩🇪 Germany',100)!=='','panel name remains visible');
 putenv('MIRZA_PUBLIC_CATALOG_SECRET='.str_repeat('Z',48));
 putenv('MIRZA_APP_BRIDGE_SECRET='.str_repeat('Z',48));
 check(vpnwebCatalogSecret()==='','financial and catalog keys cannot be identical');
