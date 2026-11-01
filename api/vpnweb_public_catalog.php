@@ -95,11 +95,11 @@ function vpnwebCatalogRows(PDO $pdo): array {
                 !preg_match('/^[0-9]{1,5}$/D',$days)||(int)$days>3650) continue;
             $items[]=[
                 'panel_code'=>$code,
-                'panel_name'=>vpnwebCatalogLabel($name,0,100),
-                'provider_type'=>vpnwebCatalogLabel((string)($panel['type']??''),0,60),
+                'panel_name'=>vpnwebCatalogLabel($name,100),
+                'provider_type'=>vpnwebCatalogLabel((string)($panel['type']??''),60),
                 'plan_code'=>$plan,
-                'title'=>vpnwebCatalogLabel($title,0,200),
-                'category'=>vpnwebCatalogLabel(trim((string)($product['category']??'')),0,80),
+                'title'=>vpnwebCatalogLabel($title,200),
+                'category'=>vpnwebCatalogLabel(trim((string)($product['category']??'')),80),
                 'volume_gb'=>(float)$volume,
                 'days'=>(int)$days,
                 'price_toman'=>(int)$price
