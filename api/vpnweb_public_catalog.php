@@ -47,6 +47,12 @@ function vpnwebCatalogEnabledProduct(array $product,?string $flag): bool {
     return in_array(strtolower(trim((string)($product[$flag]??''))),
         ['1','active','enabled','enable','on','true'],true);
 }
+function vpnwebCatalogLabel($value,int $limit): string {
+    $text=trim((string)$value);
+    // Unicode-safe truncation without requiring optional mbstring in PHP.
+    if (preg_match('/^.{0,'.$limit.'}/us',$text,$match)) return $match[0];
+    return '';
+}
 function vpnwebCatalogRows(PDO $pdo): array {
     // Mirza Mini App public-user filter: active panel + f/all + not manual sale.
     $panels=$pdo->query("SELECT code_panel,name_panel,type FROM marzban_panel
@@ -89,11 +95,11 @@ function vpnwebCatalogRows(PDO $pdo): array {
                 !preg_match('/^[0-9]{1,5}$/D',$days)||(int)$days>3650) continue;
             $items[]=[
                 'panel_code'=>$code,
-                'panel_name'=>mb_substr($name,0,100),
-                'provider_type'=>mb_substr((string)($panel['type']??''),0,60),
+                'panel_name'=>vpnwebCatalogLabel($name,0,100),
+                'provider_type'=>vpnwebCatalogLabel((string)($panel['type']??''),0,60),
                 'plan_code'=>$plan,
-                'title'=>mb_substr($title,0,200),
-                'category'=>mb_substr(trim((string)($product['category']??'')),0,80),
+                'title'=>vpnwebCatalogLabel($title,0,200),
+                'category'=>vpnwebCatalogLabel(trim((string)($product['category']??'')),0,80),
                 'volume_gb'=>(float)$volume,
                 'days'=>(int)$days,
                 'price_toman'=>(int)$price
