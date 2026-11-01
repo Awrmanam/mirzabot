@@ -124,8 +124,14 @@ try {
     require_once __DIR__.'/../config.php'; // Existing PDO credentials; SELECT only.
     if(!isset($pdo)||!($pdo instanceof PDO))
         throw new RuntimeException('No database');
+    // The existing Mirza PDO credentials are broader than this route needs.
+    // Pin a DB-level READ ONLY transaction; any accidental write must fail.
+    $pdo->exec('SET TRANSACTION READ ONLY');
+    $pdo->beginTransaction();
+    $items=vpnwebCatalogRows($pdo);
+    $pdo->commit();
     vpnwebCatalogReply(200,[
-        'items'=>vpnwebCatalogRows($pdo),
+        'items'=>$items,
         'price_type'=>'public_base','scope'=>'public','cache_seconds'=>60
     ]);
 } catch(Throwable $exception) {
