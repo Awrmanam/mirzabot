@@ -53,7 +53,7 @@ function mmpPreview($adminId, array $data)
         "با تأیید فقط دکمه زیر پست کانال افزوده می‌شود.",
         [
             [['text' => '🔎 مشاهده پست اصلی', 'url' => $data['post_url']]],
-            [['text' => $data['button_title'], 'url' => $data['button_url']]],
+            [mmtGreenPostButton($data['button_title'], $data['button_url'])],
             [mmtButton('✅ افزودن دکمه به پست', 'mmp_apply')],
             [mmtButton('❌ انصراف', 'mmp_cancel')]
         ]
@@ -189,7 +189,7 @@ function mmpHandleAdminUpdate($adminId, $text, $callback, $update)
             if ($claim->rowCount() !== 1) return true;
 
             $markup = json_encode(['inline_keyboard' => [[
-                ['text' => $data['button_title'], 'url' => $data['button_url']]
+                mmtGreenPostButton($data['button_title'], $data['button_url'])
             ]]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $result = telegram('editMessageReplyMarkup', [
                 'chat_id' => $data['chat_id'],
