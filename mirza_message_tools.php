@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/mirza_premium_post_buttons.php';
 /**
  * Mirza message tools: publish NEW channel/group messages with URL buttons,
  * and remove persistent reply keyboards left by a previous bot implementation.
@@ -62,6 +63,7 @@ function mmtHome($chatId)
         "🧰 ابزار پیام‌های میرزا\n\nپست جدید را همراه یک دکمه لینک‌دار منتشر کن یا کیبورد باقی‌مانده از ربات قبلی را پاکسازی کن.",
         [
             [mmtButton('📢 انتشار پست جدید با دکمه', 'mmt_post_new')],
+            [mmtButton('✨ دکمه روی پست پریمیوم کانال', 'mmp_start')],
             [mmtButton('🧹 پاکسازی کیبورد قدیمی', 'mmt_cleanup_panel')],
             [mmtButton('⬅️ مدیریت اصلی', 'admin')]
         ]
@@ -287,6 +289,8 @@ function mmtHandleAdminUpdate($adminId, $text, $callback, $update)
     if (!mmtReady() || ($adminrulecheck['rule'] ?? '') !== 'administrator') return false;
     $text = is_string($text) ? trim($text) : '';
     $callback = is_string($callback) ? $callback : '';
+    // Premium-preserving mode changes ONLY the inline keyboard of a channel post.
+    if (mmpHandleAdminUpdate($adminId, $text, $callback, $update)) return true;
     $isToolsCommand = strncmp($callback, 'mmt_', 4) === 0;
     $isTextTrigger = in_array($text, [
         '📢 انتشار پست با دکمه', '🧹 پاکسازی کیبورد قدیمی', '/posttools'
