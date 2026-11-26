@@ -123,7 +123,8 @@ function mmtSendKeyboardRemoval($userId, $isAdmin = false)
 function mmtCleanupOnInteraction($userId, array $user, array $setting)
 {
     global $pdo;
-    if (!mmtReady() || ($setting['inlinebtnmain'] ?? '') !== 'oninline') return;
+    if (!mmtReady() || ($setting['inlinebtnmain'] ?? '') !== 'oninline' ||
+        mmtSetting('cleanup_interactive_enabled') !== '1') return;
     if (($user['step'] ?? '') === 'get_number') return;
     if (($setting['get_number'] ?? '') === 'onAuthenticationphone' &&
         ($user['number'] ?? '') === 'none') return;
@@ -214,13 +215,16 @@ function mmtCleanupPanel($chatId)
         $counts[$row['status']] = (int) $row['total'];
     }
     $running = mmtSetting('cleanup_running') === '1' ? 'فعال' : 'متوقف';
+    $automatic = mmtSetting('cleanup_interactive_enabled') === '1' ? 'فعال' : 'خاموش';
     return mmtReply($chatId, "🧹 پاکسازی کیبورد قدیمی\n\n" .
-        "وضعیت: {$running}\nپاکسازی‌شده: {$counts['done']}\n" .
+        "ارسال گروهی: {$running}\nپاکسازی هنگام تعامل: {$automatic}\nپاکسازی‌شده: {$counts['done']}\n" .
         "در صف: {$counts['pending']}\nدر حال پردازش: {$counts['sending']}\n" .
         "ناموفق: {$counts['failed']}\n\n" .
         "ادمین‌ها از پاکسازی گروهی مستثنا هستند. بدون تأیید شما پیامی به کل کاربران ارسال نمی‌شود.",
         [
             [mmtButton('🧪 تست روی حساب خودم', 'mmt_cleanup_self')],
+            [mmtButton('✅ فعال‌سازی پاکسازی هنگام تعامل', 'mmt_auto_on')],
+            [mmtButton('⛔ غیرفعال‌سازی پاکسازی هنگام تعامل', 'mmt_auto_off')],
             [mmtButton('▶️ شروع پاکسازی گروهی', 'mmt_cleanup_confirm')],
             [mmtButton('⏸ توقف ارسال گروهی', 'mmt_cleanup_pause')],
             [mmtButton('🔄 تلاش دوباره برای ناموفق‌ها', 'mmt_cleanup_retry')],
@@ -307,6 +311,11 @@ function mmtHandleAdminUpdate($adminId, $text, $callback, $update)
         }
         if ($text === '🧹 پاکسازی کیبورد قدیمی' || $callback === 'mmt_cleanup_panel') {
             mmtDeleteSession($adminId);
+            mmtCleanupPanel($adminId);
+            return true;
+        }
+        if ($callback === 'mmt_auto_on' || $callback === 'mmt_auto_off') {
+            mmtSetSetting('cleanup_interactive_enabled', $callback === 'mmt_auto_on' ? '1' : '0');
             mmtCleanupPanel($adminId);
             return true;
         }
