@@ -320,6 +320,7 @@ function mmtHandleAdminUpdate($adminId, $text, $callback, $update)
             return true;
         }
         if ($callback === 'mmt_cleanup_confirm') {
+            mmtSaveSession($adminId, 'cleanup_confirm');
             $count = (int) $pdo->query("SELECT COUNT(*) FROM user u
                 LEFT JOIN admin a ON a.id_admin = u.id
                 WHERE a.id_admin IS NULL AND u.id REGEXP '^[0-9]+$'")->fetchColumn();
@@ -332,6 +333,13 @@ function mmtHandleAdminUpdate($adminId, $text, $callback, $update)
             return true;
         }
         if ($callback === 'mmt_cleanup_start') {
+            $confirm = mmtSession($adminId);
+            if (!$confirm || $confirm['stage'] !== 'cleanup_confirm') {
+                mmtReply($adminId, '⚠️ برای شروع ارسال گروهی، ابتدا تأیید جدید بگیر.',
+                    [[mmtButton('🧹 پاکسازی', 'mmt_cleanup_panel')]]);
+                return true;
+            }
+            mmtDeleteSession($adminId);
             $pdo->exec("INSERT IGNORE INTO mirza_msg_keyboard_cleanup (user_id, status)
                 SELECT CAST(u.id AS CHAR), 'pending' FROM user u
                 LEFT JOIN admin a ON a.id_admin = u.id
