@@ -47,4 +47,5 @@ foreach ($statements as $sql) {
     $pdo->exec($sql);
 }
 $pdo->exec("INSERT IGNORE INTO mirza_msg_settings (name, value) VALUES ('cleanup_running', '0')");
+$pdo->exec("INSERT IGNORE INTO mirza_msg_settings (name, value) VALUES ('cleanup_interactive_enabled', '0')");
 echo "OK: message tools schema is installed (4 additive tables).\n";
