@@ -11,6 +11,7 @@ require_once 'botapi.php';
 require_once 'jdf.php';
 require_once 'function.php';
 require_once 'ticket_system.php';
+require_once __DIR__ . '/mirza_message_tools.php';
 require_once 'keyboard.php';
 require_once 'vendor/autoload.php';
 require_once 'panels.php';
@@ -119,6 +120,11 @@ if ($user == false) {
 $admin_ids = select("admin", "id_admin", null, null, "FETCH_COLUMN");
 if (!is_array($admin_ids)) {
     $admin_ids = [];
+}
+// Previous bot's persistent keyboard is removed once, on private customer interaction.
+// Admins and contact-verification sessions are kept intact.
+if ($Chat_type === 'private' && !in_array((string) $from_id, array_map('strval', $admin_ids), true)) {
+    mmtCleanupOnInteraction($from_id, $user, $setting);
 }
 $helpdata = select("help", "*");
 $id_invoice = select("invoice", "id_invoice", null, null, "FETCH_COLUMN");
@@ -397,6 +403,11 @@ if (styledHandleUpdate()) {
     return;
 }
 if (ticketHandleUpdate()) {
+    return;
+}
+// These admin tools have independent state and never change Mirza purchase logic.
+if ($Chat_type === 'private' && in_array((string) $from_id, array_map('strval', $admin_ids), true)
+    && mmtHandleAdminUpdate($from_id, $text, $datain, $update)) {
     return;
 }
 if ($text == "/start" || $datain == "start" || $text == "start") {
