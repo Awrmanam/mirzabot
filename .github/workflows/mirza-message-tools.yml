@@ -5,6 +5,7 @@ on:
     branches: [rebecca-support]
     paths:
       - 'tools/install_message_tools_nogit.sh'
+      - 'tools/upgrade_message_tools_premium_nogit.sh'
       - '.github/workflows/mirza-message-tools.yml'
   pull_request:
     branches: [rebecca-support]
@@ -18,6 +19,7 @@ on:
       - 'tests/message_tools_smoke.php'
       - '.github/workflows/mirza-message-tools.yml'
       - 'tools/install_message_tools_nogit.sh'
+      - 'tools/upgrade_message_tools_premium_nogit.sh'
 
 jobs:
   php-smoke:
@@ -25,7 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Deployment shell syntax
-        run: bash -n tools/install_message_tools_nogit.sh
+        run: |
+          bash -n tools/install_message_tools_nogit.sh
+          bash -n tools/upgrade_message_tools_premium_nogit.sh
       - name: PHP syntax checks
         run: |
           php -l index.php
