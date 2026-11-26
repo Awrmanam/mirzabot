@@ -54,4 +54,9 @@ check(mmpParseChannelLink('https://evil.com/t.me/c/123456789/91') === null,
 check(mmpParseChannelLink('https://t.me/TestChannel_123') === null,
     'reject links without a message ID');
 
+$green = mmtGreenPostButton('🛒 ثبت سفارش', 'https://t.me/ExampleBot?start=buy');
+check(($green['style'] ?? '') === 'success', 'channel URL button uses theme-adaptive green success');
+check(($green['url'] ?? '') === 'https://t.me/ExampleBot?start=buy', 'post URL retained');
+check(($green['text'] ?? '') === '🛒 ثبت سفارش', 'button label retained');
+
 echo "All smoke tests passed. No Telegram requests or database writes were made.\n";

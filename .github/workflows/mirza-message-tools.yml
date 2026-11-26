@@ -6,6 +6,7 @@ on:
     paths:
       - 'tools/install_message_tools_nogit.sh'
       - 'tools/upgrade_message_tools_premium_nogit.sh'
+      - 'tools/upgrade_message_tools_green_nogit.sh'
       - '.github/workflows/mirza-message-tools.yml'
   pull_request:
     branches: [rebecca-support]
@@ -20,6 +21,7 @@ on:
       - '.github/workflows/mirza-message-tools.yml'
       - 'tools/install_message_tools_nogit.sh'
       - 'tools/upgrade_message_tools_premium_nogit.sh'
+      - 'tools/upgrade_message_tools_green_nogit.sh'
 
 jobs:
   php-smoke:
@@ -30,6 +32,7 @@ jobs:
         run: |
           bash -n tools/install_message_tools_nogit.sh
           bash -n tools/upgrade_message_tools_premium_nogit.sh
+          bash -n tools/upgrade_message_tools_green_nogit.sh
       - name: PHP syntax checks
         run: |
           php -l index.php

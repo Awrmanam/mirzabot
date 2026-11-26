@@ -252,6 +252,12 @@ function mmtPostCancelRows()
     return [[mmtButton('❌ لغو و بازگشت', 'mmt_cancel')]];
 }
 
+function mmtGreenPostButton($title, $url)
+{
+    // Telegram chooses an appropriate green shade for the client's theme.
+    return ['text' => (string) $title, 'url' => (string) $url, 'style' => 'success'];
+}
+
 function mmtPostPreview($adminId, array $data)
 {
     if (empty($data['source']) || empty($data['destination']) ||
@@ -260,7 +266,7 @@ function mmtPostPreview($adminId, array $data)
             [[mmtButton('🔄 شروع مجدد', 'mmt_post_new')]]);
     }
     $keyboard = ['inline_keyboard' => [[
-        ['text' => $data['button_title'], 'url' => $data['button_url']]
+        mmtGreenPostButton($data['button_title'], $data['button_url'])
     ]]];
     $result = telegram('copyMessage', [
         'chat_id' => $adminId,
@@ -489,7 +495,7 @@ function mmtHandleAdminUpdate($adminId, $text, $callback, $update)
             if ($claim->rowCount() !== 1) return true; // Prevent double-post on double taps.
 
             $markup = json_encode(['inline_keyboard' => [[
-                ['text' => $data['button_title'], 'url' => $data['button_url']]
+                mmtGreenPostButton($data['button_title'], $data['button_url'])
             ]]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $result = telegram('copyMessage', [
                 'chat_id' => $data['destination'],
