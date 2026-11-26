@@ -12,6 +12,7 @@ on:
       - 'index.php'
       - 'keyboard.php'
       - 'mirza_message_tools.php'
+      - 'mirza_premium_post_buttons.php'
       - 'mirza_message_tools_install.php'
       - 'cronbot/mirza_message_tools_cleanup.php'
       - 'tests/message_tools_smoke.php'
@@ -30,6 +31,7 @@ jobs:
           php -l index.php
           php -l keyboard.php
           php -l mirza_message_tools.php
+          php -l mirza_premium_post_buttons.php
           php -l mirza_message_tools_install.php
           php -l cronbot/mirza_message_tools_cleanup.php
           php -l tests/message_tools_smoke.php
