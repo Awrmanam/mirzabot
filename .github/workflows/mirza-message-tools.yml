@@ -1,0 +1,29 @@
+name: Mirza message tools smoke checks
+
+on:
+  pull_request:
+    branches: [rebecca-support]
+    paths:
+      - 'index.php'
+      - 'keyboard.php'
+      - 'mirza_message_tools.php'
+      - 'mirza_message_tools_install.php'
+      - 'cronbot/mirza_message_tools_cleanup.php'
+      - 'tests/message_tools_smoke.php'
+      - '.github/workflows/mirza-message-tools.yml'
+
+jobs:
+  php-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax checks
+        run: |
+          php -l index.php
+          php -l keyboard.php
+          php -l mirza_message_tools.php
+          php -l mirza_message_tools_install.php
+          php -l cronbot/mirza_message_tools_cleanup.php
+          php -l tests/message_tools_smoke.php
+      - name: No-network smoke tests
+        run: php tests/message_tools_smoke.php
