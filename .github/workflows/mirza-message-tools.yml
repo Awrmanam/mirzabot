@@ -1,6 +1,11 @@
 name: Mirza message tools smoke checks
 
 on:
+  push:
+    branches: [rebecca-support]
+    paths:
+      - 'tools/install_message_tools_nogit.sh'
+      - '.github/workflows/mirza-message-tools.yml'
   pull_request:
     branches: [rebecca-support]
     paths:
@@ -11,12 +16,15 @@ on:
       - 'cronbot/mirza_message_tools_cleanup.php'
       - 'tests/message_tools_smoke.php'
       - '.github/workflows/mirza-message-tools.yml'
+      - 'tools/install_message_tools_nogit.sh'
 
 jobs:
   php-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Deployment shell syntax
+        run: bash -n tools/install_message_tools_nogit.sh
       - name: PHP syntax checks
         run: |
           php -l index.php
